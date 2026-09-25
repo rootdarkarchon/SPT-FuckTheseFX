@@ -45,7 +45,7 @@ namespace FuckTheseFX.Source.Occlusion
             try
             {
                 assets = new GpuAssets(pluginPath);
-                ambient = new AmbientOcclusionBridge(assets.Ambient,settings,EligibleAmbient);
+                ambient = new AmbientOcclusionBridge(assets.Ambient,settings,EligibleAmbient,LightingDebugTarget);
                 ambient.Initialize();
                 var target = AccessTools.DeclaredMethod(typeof(CameraManager),nameof(CameraManager.SetSSAO),new[] {typeof(ESSAOMode)});
                 if(target == null || target.ReturnType != typeof(void)) throw new MissingMethodException("CameraManager.SetSSAO");
@@ -73,6 +73,12 @@ namespace FuckTheseFX.Source.Occlusion
                 Hbao = __instance._hbao != null && __instance._hbao.enabled,
                 Cinematic = __instance._ambientOcclusion != null && __instance._ambientOcclusion.enabled };
         }
+        private RenderTexture LightingDebugTarget(Camera camera)
+        {
+            foreach(var binding in bindings.Values)
+                if(binding.Camera == camera && binding.Effect != null && binding.Effect.Active) return binding.Effect.LightingDebugTexture;
+            return null;
+        }
         private bool EligibleAmbient(Camera camera)
         {
             foreach(var binding in bindings.Values)
@@ -92,7 +98,7 @@ namespace FuckTheseFX.Source.Occlusion
                 try
                 {
                     if(binding.Effect == null) binding.Effect = new CameraOcclusion(camera,assets);
-                    binding.Effect.Record(settings,Quality(binding.Mode),ambient.Ready);
+                    binding.Effect.Record(settings,settings.Quality.Value,ambient.Ready);
                     if(binding.Manager._hbao != null) binding.Manager._hbao.enabled = false;
                     if(binding.Manager._ambientOcclusion != null) binding.Manager._ambientOcclusion.enabled = false;
                     diagnostic = binding.Effect.DebugTexture;
@@ -102,16 +108,6 @@ namespace FuckTheseFX.Source.Occlusion
                     binding.Restore(); binding.Failed = true; ambient.Restore(); diagnostic = null;
                     Plugin.MyLog.LogError("XeGTAO camera failed; native AO restored. Toggle XeGTAO off/on to retry. "+error);
                 }
-            }
-        }
-        internal static int Quality(ESSAOMode mode)
-        {
-            switch(mode)
-            {
-                case ESSAOMode.FastestPerformance: return 0;
-                case ESSAOMode.FastPerformance: return 1;
-                case ESSAOMode.HighQuality: return 2;
-                default: return 3;
             }
         }
         internal void Update()
@@ -135,6 +131,32 @@ namespace FuckTheseFX.Source.Occlusion
             int old = GUI.depth; GUI.depth = 1000;
             var color = GUI.color; GUI.color = Color.white;
             GUI.DrawTexture(new Rect(0,0,Screen.width,Screen.height),diagnostic,ScaleMode.StretchToFill,false);
+            if(settings.LightingDebug)
+            {
+                string stage, legend;
+                if(settings.BentDifferenceDebug)
+                {
+                    stage = settings.View.Value == OcclusionView.BentSHDifference ? "SH difference before interior blend" : "Diffuse lighting difference after interior blend, albedo and AO";
+                    stage += " | gain "+settings.LightingDebugGain.ToString("0.#")+"x";
+                    legend = "Black: zero; brighter: larger difference. Red: bent shader off; magenta: missing inputs. Requires Bent normals.";
+                }
+                else if(settings.View.Value == OcclusionView.AmbientShares)
+                {
+                    stage = "Ambient shares (relative luminance; gain ignored)";
+                    legend = "Red: directional SH; green: upward SH; blue: fill. Mixed colors: mixed contributions. Black: no diffuse/fill light.";
+                }
+                else if(settings.View.Value == OcclusionView.AmbientInteriorTransmission)
+                {
+                    stage = "Directional SH transmission through interior blend and visibility (gain ignored)";
+                    legend = "Black: 0%; white: 100%. Excludes material albedo and AO. Dark areas suppress the bent-normal SH difference.";
+                }
+                else
+                {
+                    stage = settings.View.Value+" contribution after blend, albedo and AO | gain "+settings.LightingDebugGain.ToString("0.#")+"x";
+                    legend = "Black: zero contribution. Same gain across all three component views; higher gain can clip bright values.";
+                }
+                GUI.Box(new Rect(15,15,1050,70),stage+"\n"+legend+"\nCyan: no CustomAmbient capture. Requires XeGTAO + CustomAmbient fix. Excludes reflections/direct lights. Diagnostic view adds GPU work.");
+            }
             GUI.depth = old; GUI.color = color;
         }
         public void Dispose()

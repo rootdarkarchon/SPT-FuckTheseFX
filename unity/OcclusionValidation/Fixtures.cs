@@ -14,4 +14,16 @@ namespace EFT.CameraControl
  }
 }
 namespace EFT.UI { public class PreloaderUI { public void ShowRaidStartInfo() { } } }
-public class AmbientLight { public class CamSettings { } private Material _screenAmbientMaterial; public void InitAmbientBuffer(CamSettings settings,Camera camera) { } }
+public class AmbientLight
+{
+ public class CamSettings { public UnityEngine.Rendering.CommandBuffer CbAmbient = new UnityEngine.Rendering.CommandBuffer(); }
+ private Material _screenAmbientMaterial;
+ public Mesh Quad;
+ public AmbientLight(Material material=null) { _screenAmbientMaterial=material; }
+ [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+ public void InitAmbientBuffer(CamSettings settings,Camera camera)
+ {
+  settings.CbAmbient.Clear();settings.CbAmbient.SetRenderTarget(UnityEngine.Rendering.BuiltinRenderTextureType.CameraTarget);
+  settings.CbAmbient.DrawMesh(Quad,Matrix4x4.identity,_screenAmbientMaterial,0,0,null);
+ }
+}

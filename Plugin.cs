@@ -6,6 +6,7 @@ using FuckTheseFX.Source.Highlight;
 using FuckTheseFX.Source.Bloom;
 using FuckTheseFX.Source.DistantShadows;
 using FuckTheseFX.Source.Occlusion;
+using FuckTheseFX.Source.Vintage;
 
 namespace FuckTheseFX
 {
@@ -14,10 +15,11 @@ namespace FuckTheseFX
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Guid = "com.rootdarkarchon.fuckthesefx";
-        public const string Version = "1.1.0";
+        public const string Version = "1.2.2";
         internal static ManualLogSource MyLog;
         internal static ConfigEntry<bool> AmbientHighlightEnabled, BloomUseNativeResolution, DistantShadowSamplingEnabled;
         internal static ConfigEntry<bool> BloomEnabled, DistantShadowsEnabled;
+        internal static ConfigEntry<bool> VintageEnabled;
         internal static ConfigEntry<float> BloomInputScale;
         internal static ConfigEntry<DistantShadowMaskResolution> DistantShadowResolution;
         internal static ConfigEntry<int> DistantShadowQuarterSamples, DistantShadowHalfSamples, DistantShadowFullSamples;
@@ -27,6 +29,7 @@ namespace FuckTheseFX
         private DistantShadowResolutionIntegration resolution;
         internal static OcclusionSettings Occlusion;
         private XeGTAOIntegration occlusion;
+        private VintageFilterIntegration vintage;
 
         private void Awake()
         {
@@ -36,6 +39,8 @@ namespace FuckTheseFX
             bloom = new BloomResolutionIntegration();
             sampling = new DistantShadowSamplingIntegration();
             resolution = new DistantShadowResolutionIntegration();
+            vintage = new VintageFilterIntegration();
+            FeatureStartup.TryInitialize("Vintage filter", vintage.Initialize);
             FeatureStartup.TryInitialize("Ambient Highlight", highlight.Initialize);
             FeatureStartup.TryInitialize("Bloom", bloom.Initialize);
             FeatureStartup.TryInitialize("Distant shadow sampling", () => sampling.Initialize(Info.Location));
@@ -54,6 +59,8 @@ namespace FuckTheseFX
             var saved = File.Exists(config.ConfigFilePath) ? new ConfigFile(config.ConfigFilePath, false) { SaveOnConfigSet = false } : null;
             AmbientHighlightEnabled = config.Bind("Ambient Highlight", "Enabled", false,
                 "When enabled uses vanilla Tarkovs behavior: Adds extra ambient brightness to weapons, hands and selected objects. Off removes this artificial glow.");
+            VintageEnabled = config.Bind("Vintage Filter", "Enabled", false,
+                "Off disables the vintage camera filter. On restores effects disabled by Fuck These FX.");
             BloomEnabled = config.Bind("Ultimate Bloom", "Enabled", true,
                 "Adjusts bloom and lens-flare detail. Off keeps the game's original bloom.");
             BloomInputScale = config.Bind("Ultimate Bloom", "Bloom input scale", .67f,
@@ -105,6 +112,7 @@ namespace FuckTheseFX
 
         private void OnDestroy()
         {
+            vintage?.Dispose();
             occlusion?.Dispose(); sampling?.Dispose(); resolution?.Dispose(); highlight?.Dispose(); bloom?.Dispose();
         }
         private void OnGUI() => occlusion?.DrawDiagnostic();

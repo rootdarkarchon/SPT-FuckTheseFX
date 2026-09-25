@@ -8,6 +8,13 @@
 #pragma kernel Denoise
 #pragma kernel DenoiseLast
 #pragma kernel ActorTiles
+#pragma kernel LowBent XE_GTAO_COMPUTE_BENT_NORMALS
+#pragma kernel MediumBent XE_GTAO_COMPUTE_BENT_NORMALS
+#pragma kernel HighBent XE_GTAO_COMPUTE_BENT_NORMALS
+#pragma kernel UltraBent XE_GTAO_COMPUTE_BENT_NORMALS
+#pragma kernel CustomBent XE_GTAO_COMPUTE_BENT_NORMALS XE_GTAO_DYNAMIC_SAMPLE_COUNTS
+#pragma kernel DenoiseBent XE_GTAO_COMPUTE_BENT_NORMALS
+#pragma kernel DenoiseLastBent XE_GTAO_COMPUTE_BENT_NORMALS
 #pragma only_renderers d3d11
 
 #define VA_SATURATE saturate
@@ -127,7 +134,8 @@ void Calculate(uint2 pixel, float slices, float steps)
     }
     if (_XeDepth.Load(int3(pixel, 0)) >= _XeFarDepth * 0.9999)
     {
-        _XeOutAO[pixel] = 170; // 255 / XE_GTAO_OCCLUSION_TERM_SCALE
+        // Sky has full visibility and a valid fallback direction in either layout.
+        XeGTAO_OutputWorkingTerm(pixel, 1, float3(0,0,-1), _XeOutAO);
         _XeOutEdges[pixel] = 0;
         return;
     }
@@ -141,14 +149,12 @@ void Calculate(uint2 pixel, float slices, float steps)
 [numthreads(8, 8, 1)] void Ultra(uint2 p : SV_DispatchThreadID) { Calculate(p, 9, 3); }
 [numthreads(8, 8, 1)] void Custom(uint2 p : SV_DispatchThreadID) { Calculate(p, _XeSampling.x, _XeSampling.y); }
 
-[numthreads(8, 8, 1)]
-void Denoise(uint2 id : SV_DispatchThreadID)
+void Filter(uint2 id)
 {
     if (any(id * uint2(2, 1) >= (uint2)_XeViewport.xy)) return;
     XeGTAO_Denoise(id * uint2(2, 1), Constants(), _XeAO, _XeEdges, sampler_PointClamp, _XeOutAO, false);
 }
-[numthreads(8, 8, 1)]
-void DenoiseLast(uint2 id : SV_DispatchThreadID)
+void FilterLast(uint2 id)
 {
     if (any(id * uint2(2, 1) >= (uint2)_XeViewport.xy)) return;
     if (_XeActorOnly != 0 && _XeTiles.Load(int3(id * uint2(2,1) / 8, 0)) == 0)
@@ -159,3 +165,15 @@ void DenoiseLast(uint2 id : SV_DispatchThreadID)
     }
     XeGTAO_Denoise(id * uint2(2, 1), Constants(), _XeAO, _XeEdges, sampler_PointClamp, _XeOutAO, true);
 }
+
+// Separate variants leave scalar primary and actor kernels unchanged when disabled.
+[numthreads(8,8,1)] void LowBent(uint2 p:SV_DispatchThreadID) { Calculate(p,1,2); }
+[numthreads(8,8,1)] void MediumBent(uint2 p:SV_DispatchThreadID) { Calculate(p,2,2); }
+[numthreads(8,8,1)] void HighBent(uint2 p:SV_DispatchThreadID) { Calculate(p,3,3); }
+[numthreads(8,8,1)] void UltraBent(uint2 p:SV_DispatchThreadID) { Calculate(p,9,3); }
+[numthreads(8,8,1)] void CustomBent(uint2 p:SV_DispatchThreadID) { Calculate(p,_XeSampling.x,_XeSampling.y); }
+[numthreads(8,8,1)] void DenoiseBent(uint2 p:SV_DispatchThreadID) { Filter(p); }
+[numthreads(8,8,1)] void DenoiseLastBent(uint2 p:SV_DispatchThreadID) { FilterLast(p); }
+
+[numthreads(8,8,1)] void Denoise(uint2 p:SV_DispatchThreadID) { Filter(p); }
+[numthreads(8,8,1)] void DenoiseLast(uint2 p:SV_DispatchThreadID) { FilterLast(p); }

@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Reflection.Emit;
+using UnityEngine.Rendering;
 using System.Security.Cryptography;
 using HarmonyLib;
 using UnityEngine;
@@ -9,7 +11,7 @@ using UnityEngine;
 namespace FuckTheseFX.Source.Occlusion
 {
     // The reviewed EFT 40743 ambient shader keeps native reflection math and changes
-    // only diffuse/fill occlusion. EFT owns the materials and draw scheduling.
+    // only diffuse/fill occlusion and optional directional SH. EFT owns the materials and draw scheduling.
     internal sealed class AmbientOcclusionBridge : IDisposable
     {
         private const string ShaderHash = "D41092507FC8CADCDC3DB1D53B9F1E0CB9FC7061AD07FF3C980284731AE2091C";
@@ -17,13 +19,14 @@ namespace FuckTheseFX.Source.Occlusion
         private readonly Shader shader;
         private readonly OcclusionSettings settings;
         private readonly Func<Camera,bool> eligible;
+        private readonly Func<Camera,RenderTexture> debugTarget;
         private readonly Dictionary<Material,Shader> originals = new Dictionary<Material,Shader>();
         private readonly List<Material> dead = new List<Material>();
         private FieldInfo materialField;
         private Harmony harmony;
         internal bool Ready { get; private set; }
-        internal AmbientOcclusionBridge(Shader shader, OcclusionSettings settings, Func<Camera,bool> eligible)
-        { this.shader = shader; this.settings = settings; this.eligible = eligible; }
+        internal AmbientOcclusionBridge(Shader shader, OcclusionSettings settings, Func<Camera,bool> eligible, Func<Camera,RenderTexture> debugTarget = null)
+        { this.shader = shader; this.settings = settings; this.eligible = eligible; this.debugTarget = debugTarget; }
         internal void Initialize()
         {
             try
@@ -38,7 +41,7 @@ namespace FuckTheseFX.Source.Occlusion
                     ?? throw new MissingMethodException("AmbientLight.InitAmbientBuffer");
                 harmony = new Harmony(Plugin.Guid+".occlusion-ambient");
                 instance = this;
-                harmony.Patch(method,prefix:new HarmonyMethod(typeof(AmbientOcclusionBridge),nameof(BeforeAmbient)));
+                harmony.Patch(method,prefix:new HarmonyMethod(typeof(AmbientOcclusionBridge),nameof(BeforeAmbient)),transpiler:new HarmonyMethod(typeof(AmbientOcclusionBridge),nameof(InstrumentDraw)) { priority = Priority.First, before = new[] { "com.matsix.customambient.research" } });
                 Ready = true;
             }
             catch(Exception error) { Plugin.MyLog.LogWarning("CustomAmbient fix unavailable; native ambient retained. "+error.Message); Dispose(); }
@@ -60,17 +63,70 @@ namespace FuckTheseFX.Source.Occlusion
                 if(self.eligible(__1))
                 {
                     material.shader = self.shader;
+                    if(self.settings.LightingDebug) material.EnableKeyword("FTFX_BENT_DIAGNOSTICS");
+                    else material.DisableKeyword("FTFX_BENT_DIAGNOSTICS");
+                    if(self.settings.BentNormals.Value) material.EnableKeyword("FTFX_BENT_NORMALS");
+                    else material.DisableKeyword("FTFX_BENT_NORMALS");
                     material.SetFloat("_FTFX_CAAmount",self.settings.AmbientStrength.Value);
                     material.SetFloat("_FTFX_CA_FoliageStrength",self.settings.Foliage.Value);
                 }
-                else material.shader = original;
+                else { material.DisableKeyword("FTFX_BENT_DIAGNOSTICS"); material.DisableKeyword("FTFX_BENT_NORMALS"); material.shader = original; }
             }
             catch(Exception error) { Plugin.MyLog.LogError("CustomAmbient fix failed; native shader restored. "+error); self.Dispose(); }
+        }
+        // Surround, rather than replace, the native call so research draw wrappers still see it.
+        private static IEnumerable<CodeInstruction> InstrumentDraw(IEnumerable<CodeInstruction> instructions, ILGenerator generator)
+        {
+            var draw = AccessTools.Method(typeof(CommandBuffer),nameof(CommandBuffer.DrawMesh),new[] {typeof(Mesh),typeof(Matrix4x4),typeof(Material),typeof(int),typeof(int),typeof(MaterialPropertyBlock)});
+            var buffer = AccessTools.Field(typeof(AmbientLight.CamSettings),"CbAmbient");
+            var material = AccessTools.Field(typeof(AmbientLight),"_screenAmbientMaterial");
+            var captured = generator.DeclareLocal(typeof(bool));
+            int count = 0;
+            foreach(var instruction in instructions)
+            {
+                if(instruction.Calls(draw))
+                {
+                    var first = new CodeInstruction(OpCodes.Ldarg_1);
+                    first.MoveLabelsFrom(instruction);
+                    first.blocks.AddRange(instruction.blocks); instruction.blocks.Clear();
+                    yield return first;
+                    yield return new CodeInstruction(OpCodes.Ldfld,buffer);
+                    yield return new CodeInstruction(OpCodes.Ldarg_2);
+                    yield return new CodeInstruction(OpCodes.Ldarg_0);
+                    yield return new CodeInstruction(OpCodes.Ldfld,material);
+                    yield return new CodeInstruction(OpCodes.Call,AccessTools.Method(typeof(AmbientOcclusionBridge),nameof(BeginDebugDraw)));
+                    yield return new CodeInstruction(OpCodes.Stloc,captured);
+                    yield return instruction;
+                    yield return new CodeInstruction(OpCodes.Ldloc,captured);
+                    yield return new CodeInstruction(OpCodes.Ldarg_1);
+                    yield return new CodeInstruction(OpCodes.Ldfld,buffer);
+                    yield return new CodeInstruction(OpCodes.Call,AccessTools.Method(typeof(AmbientOcclusionBridge),nameof(EndDebugDraw)));
+                    count++;
+                }
+                else yield return instruction;
+            }
+            if(count != 1) throw new InvalidOperationException("Unsupported CustomAmbient draw layout.");
+        }
+        private static bool BeginDebugDraw(CommandBuffer cb, Camera camera, Material material)
+        {
+            var self = instance;
+            var target = self != null && self.settings.LightingDebug && material.shader == self.shader ? self.debugTarget?.Invoke(camera) : null;
+            if(target == null || !target.IsCreated()) return false;
+            cb.SetGlobalVector("_FTFX_CA_DebugInfo",new Vector4((int)self.settings.View.Value,self.settings.LightingDebugGain,target.width,target.height));
+            cb.SetGlobalFloat("_FTFX_CA_DebugAvailable",1);
+            cb.SetRandomWriteTarget(1,target);
+            return true;
+        }
+        private static void EndDebugDraw(bool captured, CommandBuffer cb)
+        {
+            if(!captured) return;
+            cb.ClearRandomWriteTargets();
+            cb.SetGlobalFloat("_FTFX_CA_DebugAvailable",0);
         }
         internal void Restore()
         {
             foreach(var pair in originals)
-                if(pair.Key != null && pair.Key.shader == shader && pair.Value != null) pair.Key.shader = pair.Value;
+                if(pair.Key != null && pair.Key.shader == shader && pair.Value != null) { pair.Key.DisableKeyword("FTFX_BENT_DIAGNOSTICS"); pair.Key.DisableKeyword("FTFX_BENT_NORMALS"); pair.Key.shader = pair.Value; }
             originals.Clear();
         }
         internal void Prune()

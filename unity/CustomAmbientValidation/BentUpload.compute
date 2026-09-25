@@ -1,0 +1,4 @@
+#pragma kernel Upload
+RWTexture2D<uint> _Output;
+uint _Bits;
+[numthreads(1,1,1)] void Upload(uint2 p:SV_DispatchThreadID) { _Output[p]=_Bits; }

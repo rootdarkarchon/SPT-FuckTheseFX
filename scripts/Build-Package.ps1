@@ -18,7 +18,7 @@ try {
     $attribute = $plugin.CustomAttributes | Where-Object { $_.AttributeType.FullName -eq 'BepInEx.BepInPlugin' }
     if ($attribute.ConstructorArguments[0].Value -ne 'com.rootdarkarchon.fuckthesefx' -or $attribute.ConstructorArguments[2].Value -ne $version) { throw 'Plugin identity/version mismatch' }
     if ($assembly.MainModule.AssemblyReferences | Where-Object Name -match 'SPTAOReplacer|FuckingCustomAmbient') { throw 'Unexpected AO plugin dependency' }
-    foreach ($name in @('AmbientHighlightIntegration','BloomResolutionIntegration','DistantShadowSamplingIntegration','DistantShadowResolutionIntegration','XeGTAOIntegration','AmbientOcclusionBridge')) {
+    foreach ($name in @('AmbientHighlightIntegration','BloomResolutionIntegration','DistantShadowSamplingIntegration','DistantShadowResolutionIntegration','XeGTAOIntegration','AmbientOcclusionBridge','VintageFilterIntegration')) {
         if (-not ($assembly.MainModule.Types | Where-Object Name -eq $name)) { throw "Missing integration: $name" }
     }
     if ($assembly.MainModule.Types | Where-Object FullName -match 'AmplifyOcclusion|AmplifyGTAO') { throw 'Amplify code leaked into FX plugin' }

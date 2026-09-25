@@ -15,6 +15,7 @@ $config.SaveOnConfigSet = $false
 $bindArgs = [object[]]::new(1); $bindArgs[0] = $config; $bind.Invoke($null, $bindArgs)
 $expected = @{
     'XeGTAO/Enabled' = 'True'
+    'XeGTAO/Quality' = '3'
     'XeGTAO/FinalPower' = '1.5'
     'XeGTAO/EffectRadius' = '1'
     'XeGTAO/RadiusMultiplier' = '1.457'
@@ -27,6 +28,7 @@ $expected = @{
     'XeGTAO/DenoiseSharpness' = '0.4'
     'XeGTAO/UseNormals' = 'True'
     'CustomAmbient fix/Enabled' = 'True'
+    'CustomAmbient fix/Bent normals' = 'False'
     'CustomAmbient fix/Strength' = '0.6'
     'CustomAmbient fix/Foliage AO strength' = '0.65'
     'Actor second AO pass/Enabled' = 'True'
@@ -35,9 +37,12 @@ $expected = @{
     'Actor second AO pass/Response' = '0.6'
     'Actor second AO pass/Distance cutoff' = '10'
     'Debug/View' = 'Normal'
+    'Debug/Bent difference gain' = '32'
+    'Debug/Ambient contribution gain' = '1'
     'Debug/Depth range' = '5'
     'Debug/Depth start' = '0'
     'Ambient Highlight/Enabled' = 'False'
+    'Vintage Filter/Enabled' = 'False'
     'Ultimate Bloom/Bloom input scale' = '0.67'
     'Ultimate Bloom/Enabled' = 'True'
     'Ultimate Bloom/Use native resolution' = 'False'
@@ -48,13 +53,13 @@ $expected = @{
     'Distant Shadows/Half filter samples' = '12'
     'Distant Shadows/Full filter samples' = '8'
 }
-if ($config.Count -ne 33) { throw 'Unexpected setting count' }
+if ($config.Count -ne 38) { throw 'Unexpected setting count' }
 foreach ($definition in $config.Keys) {
     $entry = $config[$definition]
     $name = "$($definition.Section)/$($definition.Key)"
     if (-not $expected.ContainsKey($name) -or $entry.DefaultValue.ToString() -ne $expected[$name]) { throw "Wrong default: $name" }
     $advanced = @($entry.Description.Tags | Where-Object { $_.GetType().GetField('IsAdvanced').GetValue($_) -eq $true }).Count -eq 1
-    if ($advanced -ne ($definition.Key -match '^(Adjust filter samples|(Quarter|Half|Full) filter samples)$' -or $definition.Section -in @('CustomAmbient fix','Debug') -or ($definition.Section -in @('XeGTAO','Actor second AO pass') -and $definition.Key -ne 'Enabled'))) { throw "Incorrect advanced visibility: $name" }
+    if ($advanced -ne ($definition.Key -match '^(Adjust filter samples|(Quarter|Half|Full) filter samples)$' -or $definition.Section -in @('CustomAmbient fix','Debug') -or ($definition.Section -in @('XeGTAO','Actor second AO pass') -and $definition.Key -notin @('Enabled','Quality')))) { throw "Incorrect advanced visibility: $name" }
 }
 function Entry($section,$key) { $config[[BepInEx.Configuration.ConfigDefinition]::new($section,$key)] }
 foreach ($key in @('Quarter filter samples','Half filter samples','Full filter samples')) {
@@ -67,12 +72,19 @@ $radiusEntry = Entry 'XeGTAO' 'EffectRadius'
 $radiusEntry.SetSerializedValue('0.55')
 $enabledEntry = Entry 'XeGTAO' 'Enabled'
 $enabledEntry.SetSerializedValue('false')
+$bentEntry = Entry 'CustomAmbient fix' 'Bent normals'
+$bentEntry.SetSerializedValue('true')
+$vintageEntry = Entry 'Vintage Filter' 'Enabled'
+$vintageEntry.SetSerializedValue('true')
+$qualityEntry = Entry 'XeGTAO' 'Quality'
+if ($qualityEntry.Description.AcceptableValues.Clamp([int]-1) -ne 0 -or $qualityEntry.Description.AcceptableValues.Clamp([int]4) -ne 3) { throw 'Quality bounds changed' }
+$qualityEntry.SetSerializedValue('1')
 $config.Save()
 $saved = [BepInEx.Configuration.ConfigFile]::new($path,$false)
 $saved.SaveOnConfigSet = $false
 $bindArgs[0] = $saved; $bind.Invoke($null,$bindArgs)
 foreach ($definition in $config.Keys) { if ($saved[$definition].GetSerializedValue() -ne $config[$definition].GetSerializedValue()) { throw 'Saved preference did not survive reload' } }
-Write-Output 'Verified 33 settings, eight normal controls, defaults, bounds and saved preferences. No AOReplacer import.'
+Write-Output 'Verified 38 settings, ten normal controls, defaults, bounds and saved preferences. No AOReplacer import.'
 
 $enum = $assembly.GetType('FuckTheseFX.Source.DistantShadows.DistantShadowMaskResolution', $true)
 if ([Enum]::GetNames($enum) -join ',' -ne 'Quarter,Half,Full') { throw 'Unexpected resolution option' }

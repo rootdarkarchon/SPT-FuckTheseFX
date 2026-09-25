@@ -15,7 +15,9 @@ namespace FuckTheseFX.Source.Occlusion
         private readonly CommandBuffer reset, capture, calculate, actors, cleanup;
         private int width, height;
         private CameraEvent calculationEvent;
+        internal int LastQuality { get; private set; }
         internal RenderTexture DebugTexture => debug;
+        internal RenderTexture LightingDebugTexture { get; private set; }
         internal bool Active { get; private set; }
         internal bool AmbientActive { get; private set; }
         internal const string Prefix = "_FTFX_CA_";
@@ -40,18 +42,20 @@ namespace FuckTheseFX.Source.Occlusion
 
         internal static void ResetGlobals(CommandBuffer cb)
         {
+            cb.SetGlobalFloat(Prefix+"BentAvailable",0);
             cb.SetGlobalFloat(Prefix+"MaterialCaptured",0); cb.SetGlobalFloat(Prefix+"SeparateAOAvailable",0);
             cb.SetGlobalTexture(Prefix+"OriginalOcclusion",Texture2D.whiteTexture); cb.SetGlobalTexture(Prefix+"ScreenAO",Texture2D.whiteTexture);
         }
         internal static void ResetGlobals()
         {
+            Shader.SetGlobalFloat(Prefix+"BentAvailable",0);
             Shader.SetGlobalFloat(Prefix+"MaterialCaptured",0); Shader.SetGlobalFloat(Prefix+"SeparateAOAvailable",0);
             Shader.SetGlobalTexture(Prefix+"OriginalOcclusion",Texture2D.whiteTexture); Shader.SetGlobalTexture(Prefix+"ScreenAO",Texture2D.whiteTexture);
         }
 
         internal void Record(OcclusionSettings settings, int quality, bool ambientAvailable)
         {
-            Active = false;
+            Active = false; LightingDebugTexture = null; LastQuality = quality;
             capture.Clear(); calculate.Clear(); actors.Clear();
             if(width != camera.pixelWidth || height != camera.pixelHeight || resolved == null || !resolved.IsCreated())
             {
@@ -69,6 +73,11 @@ namespace FuckTheseFX.Source.Occlusion
             composite.SetVector("_ActorSettings",new Vector4(settings.ActorStrength.Value,settings.ActorResponse.Value,settings.ActorCutoff.Value,0));
             composite.SetVector("_Debug",new Vector4((int)settings.View.Value,settings.DepthStart.Value,settings.DepthRange.Value,0));
             AmbientActive = ambientAvailable && settings.Ambient.Value && settings.AmbientStrength.Value > 0;
+            bool bent = AmbientActive && settings.BentNormals.Value;
+            composite.SetFloat("_BentNormals",bent ? 1 : 0);
+            // Invert LoadNormal's XeGTAO Y/Z reflection before rotating to world space.
+            var bentToWorld = camera.cameraToWorldMatrix * Matrix4x4.Scale(new Vector3(1,-1,-1));
+            composite.SetMatrix("_BentToWorld",bentToWorld);
             if(AmbientActive)
             {
                 if(originalAlpha == null) originalAlpha = Target("Original material AO",GraphicsFormat.R8_UNorm);
@@ -91,7 +100,7 @@ namespace FuckTheseFX.Source.Occlusion
             if(primary == null) primary = new OcclusionPipeline(assets.Compute,false);
             var p = settings.Primary;
             primary.Prepare(width,height,p.Denoise);
-            primary.Record(calculate,camera,quality,p);
+            primary.Record(calculate,camera,quality,p,bentNormals:bent);
             Resolve(calculate,primary.Result,resolved,primary.Depth,size);
             if(AmbientActive)
             {
@@ -99,9 +108,17 @@ namespace FuckTheseFX.Source.Occlusion
                 calculate.SetGlobalVector(Prefix+"AODecode",new Vector4(2,.8f,size.z,0));
                 calculate.SetGlobalVector(Prefix+"AOFade",new Vector4(35,1f/65,0,1));
                 calculate.SetGlobalFloat(Prefix+"SeparateAOAvailable",1);
+                if(bent)
+                {
+                    calculate.SetGlobalTexture(Prefix+"BentAO",primary.Result);
+                    calculate.SetGlobalVector(Prefix+"BentSize",new Vector4(width,height,0,0));
+                    calculate.SetGlobalMatrix(Prefix+"BentToWorld",bentToWorld);
+                    calculate.SetGlobalFloat(Prefix+"BentAvailable",1);
+                }
             }
             calculate.BeginSample("FTFX Primary composite");
             var primaryProperties = new MaterialPropertyBlock(); primaryProperties.SetTexture("_PrimaryAO",resolved);
+            primaryProperties.SetTexture("_XeAO",primary.Result);
             if(!camera.allowHDR)
             {
                 int emission = Shader.PropertyToID("_FTFX_EmissionCopy");
@@ -120,8 +137,14 @@ namespace FuckTheseFX.Source.Occlusion
             calculate.EndSample("FTFX Primary composite");
             if(settings.View.Value != OcclusionView.Normal)
             {
-                if(debug == null) debug = Target("AO diagnostics",GraphicsFormat.R8G8B8A8_UNorm);
-                if(settings.View.Value == OcclusionView.SecondPassAO)
+                if(debug == null) debug = GpuAssets.Target("FTFX AO diagnostics",width,height,GraphicsFormat.R8G8B8A8_UNorm,true);
+                if(settings.LightingDebug)
+                {
+                    LightingDebugTexture = debug;
+                    // A real ambient fragment must overwrite this sentinel each frame.
+                    calculate.SetRenderTarget(debug); calculate.ClearRenderTarget(false,true,Color.cyan);
+                }
+                else if(settings.View.Value == OcclusionView.SecondPassAO)
                 { calculate.SetRenderTarget(debug); calculate.ClearRenderTarget(false,true,Color.white); }
                 else
                 {
@@ -170,7 +193,7 @@ namespace FuckTheseFX.Source.Occlusion
         }
         public void Dispose()
         {
-            Active = AmbientActive = false;
+            Active = AmbientActive = false; LightingDebugTexture = null;
             if(camera != null)
             {
                 camera.RemoveCommandBuffer(CameraEvent.BeforeGBuffer,reset); camera.RemoveCommandBuffer(CameraEvent.AfterGBuffer,capture);

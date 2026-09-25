@@ -7,6 +7,10 @@ Shader "Hidden/FuckTheseFX/Occlusion"
   #pragma target 5.0
   #pragma only_renderers d3d11
   #include "UnityCG.cginc"
+  #include "BentNormals.hlsl"
+  float _BentNormals;
+  float4x4 _BentToWorld;
+  Texture2D<float4> _CameraGBufferTexture2;
   Texture2D<uint> _XeAO;
   Texture2D<float> _XeDepth;
   Texture2D<float> _ActorMask;
@@ -28,7 +32,9 @@ Shader "Hidden/FuckTheseFX/Occlusion"
   float2 Resolve(Varyings i):SV_Target
   {
    int2 p=Pixel(i);
-   return float2(saturate(_XeAO.Load(int3(p,0))*(_Size.w/255)),min(_XeDepth.Load(int3(p,0))/_Size.z,65504));
+   uint packed = _XeAO.Load(int3(p,0));
+   uint visibility = _BentNormals > .5 ? packed >> 24 : packed;
+   return float2(saturate(visibility*(_Size.w/255)),min(_XeDepth.Load(int3(p,0))/_Size.z,65504));
   }
   float Primary(float2 ao)
   {
@@ -64,6 +70,14 @@ Shader "Hidden/FuckTheseFX/Occlusion"
   }
   float4 DebugAO(Varyings i):SV_Target
   {
+   if (_Debug.x == 8)
+   {
+    if (_BentNormals < .5) return float4(.5,.5,.5,1);
+    int2 p=Pixel(i);
+    float3 normal=_CameraGBufferTexture2.Load(int3(p,0)).xyz*2-1;
+    normal=dot(normal,normal)>.01 ? normalize(normal) : float3(0,1,0);
+    return float4(FTFXBentWorld(_XeAO.Load(int3(p,0)),_BentToWorld,normal)*.5+.5,1);
+   }
    float2 ao=_PrimaryAO.Load(int3(Pixel(i),0));
    float v= _Debug.x==1 ? saturate((ao.y*_Size.z-_Debug.y)/_Debug.z) : _Debug.x==6 ? Primary(ao) : ao.x;
    return float4(v,v,v,1);

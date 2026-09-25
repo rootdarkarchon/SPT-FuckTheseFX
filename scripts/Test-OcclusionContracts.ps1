@@ -16,6 +16,9 @@ try {
  $ambient=$game.MainModule.Types | Where-Object FullName -eq 'AmbientLight'
  if(-not ($ambient.Fields | Where-Object { $_.Name -eq '_screenAmbientMaterial' -and $_.FieldType.FullName -eq 'UnityEngine.Material' })) { throw 'Missing ambient material' }
  if(-not ($ambient.Methods | Where-Object { $_.Name -eq 'InitAmbientBuffer' -and $_.Parameters.Count -eq 2 -and $_.Parameters[0].ParameterType.FullName -eq 'AmbientLight/CamSettings' -and $_.Parameters[1].ParameterType.FullName -eq 'UnityEngine.Camera' })) { throw 'Unsupported ambient hook' }
+ $init=$ambient.Methods | Where-Object Name -eq 'InitAmbientBuffer'
+ $draws=@($init.Body.Instructions | Where-Object { $_.OpCode.Name -eq 'callvirt' -and $_.Operand.Name -eq 'DrawMesh' -and $_.Operand.DeclaringType.FullName -eq 'UnityEngine.Rendering.CommandBuffer' -and $_.Operand.Parameters.Count -eq 6 })
+ if($draws.Count -ne 1) { throw 'Unsupported CustomAmbient diagnostic draw layout' }
  $highlight=$game.MainModule.Types | Where-Object FullName -eq 'AmbientHighlight'
  $stencil=$highlight.NestedTypes | Where-Object Name -eq 'StencilType'
  foreach($pair in @(@('Static',0),@('Characters',1),@('Hands',2))) {

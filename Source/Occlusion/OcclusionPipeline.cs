@@ -10,7 +10,9 @@ namespace FuckTheseFX.Source.Occlusion
     {
         private readonly ComputeShader compute;
         private readonly int prefilter, main, denoise, last, classify;
-        private readonly int[] presets = new int[4];
+        private readonly int[] presets = new int[4], bentPresets = new int[4];
+        private readonly int bentMain, bentDenoise, bentLast;
+        internal bool BentNormals { get; private set; }
         private readonly bool actor;
         internal RenderTexture Depth, Raw, Filtered;
         private RenderTexture edges, scratch, tiles;
@@ -30,6 +32,11 @@ namespace FuckTheseFX.Source.Occlusion
                 foreach (int kernel in new[] { prefilter, main, denoise, last, classify })
                     if (!compute.IsSupported(kernel)) throw new InvalidOperationException("Unsupported XeGTAO kernel.");
                 foreach(int kernel in presets) if(!compute.IsSupported(kernel)) throw new InvalidOperationException("Unsupported XeGTAO quality kernel.");
+                if (!actor)
+                {
+                    bentMain = compute.FindKernel("CustomBent"); bentDenoise = compute.FindKernel("DenoiseBent"); bentLast = compute.FindKernel("DenoiseLastBent");
+                    for(int i=0;i<4;i++) bentPresets[i] = compute.FindKernel(names[i]+"Bent");
+                }
             }
             catch { Dispose(); throw; }
         }
@@ -52,8 +59,9 @@ namespace FuckTheseFX.Source.Occlusion
         private RenderTexture Target(string suffix, GraphicsFormat format, bool mips = false) =>
             GpuAssets.Target("FTFX " + (actor ? "Actor " : "Primary ") + suffix, width, height, format, true, mips);
 
-        internal void Record(CommandBuffer cb, Camera camera, int quality, Parameters p, RenderTexture actorMask = null, float cutoff = 10, bool optimize = true)
+        internal void Record(CommandBuffer cb, Camera camera, int quality, Parameters p, RenderTexture actorMask = null, float cutoff = 10, bool optimize = true, bool bentNormals = false)
         {
+            BentNormals = bentNormals && !actor;
             float near = camera.nearClipPlane, far = camera.farClipPlane;
             float mul = near * far / (far-near), add = far/(far-near);
             if (SystemInfo.usesReversedZBuffer) { mul = -mul; add = -near/(far-near); }
@@ -84,7 +92,7 @@ namespace FuckTheseFX.Source.Occlusion
                 cb.EndSample("FTFX Actor tiles");
             }
             cb.BeginSample(actor ? "FTFX Actor horizons" : "FTFX Primary horizons");
-            int horizons = p.Slices > 0 || p.Steps > 0 ? main : presets[Mathf.Clamp(quality,0,3)];
+            int horizons = p.Slices > 0 || p.Steps > 0 ? (BentNormals ? bentMain : main) : (BentNormals ? bentPresets : presets)[Mathf.Clamp(quality,0,3)];
             cb.SetComputeTextureParam(compute,horizons,"_XeRawDepth",BuiltinRenderTextureType.ResolvedDepth);
             cb.SetComputeTextureParam(compute,horizons,"_XeNormals",BuiltinRenderTextureType.GBuffer2);
             cb.SetComputeTextureParam(compute,horizons,"_XeDepth",Depth);
@@ -97,7 +105,7 @@ namespace FuckTheseFX.Source.Occlusion
             cb.BeginSample(actor ? "FTFX Actor denoise" : "FTFX Primary denoise");
             for(int pass=0;pass<p.Denoise;pass++)
             {
-                int kernel = pass == p.Denoise-1 ? last : denoise;
+                int kernel = pass == p.Denoise-1 ? (BentNormals ? bentLast : last) : (BentNormals ? bentDenoise : denoise);
                 var output = (pass&1)==0 ? Filtered : scratch;
                 cb.SetComputeTextureParam(compute,kernel,"_XeAO",Result);
                 cb.SetComputeTextureParam(compute,kernel,"_XeEdges",edges);

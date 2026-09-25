@@ -18,6 +18,7 @@ public static partial class AmbientValidation
  static MaterialPropertyBlock properties;
  static readonly List<UnityEngine.Object> owned = new List<UnityEngine.Object>();
  static Texture2D albedo;
+ static RenderTexture diagnosticTarget;
  static void Check(bool ok, string description) { if(!ok) throw new Exception(description); checks++; Debug.Log("PASS "+description); }
  static Texture2D Texture(Color color) {
   var t=new Texture2D(1,1,TextureFormat.RGBAFloat,false,true); t.SetPixel(0,0,color);t.Apply();owned.Add(t);return t;
@@ -57,7 +58,9 @@ public static partial class AmbientValidation
    cb.SetGlobalFloat("_SrcBlend",sourceBlend);cb.SetGlobalFloat("_DstBlend",destinationBlend);
    cb.SetRenderTarget(camera.targetTexture);
    cb.ClearRenderTarget(false,true,initialLighting);
+   if(diagnosticTarget != null) { cb.SetGlobalFloat("_FTFX_CA_DebugAvailable",1); cb.SetRandomWriteTarget(1,diagnosticTarget); }
    cb.DrawMesh(quad,Matrix4x4.identity,mat,0,drawPass,properties);
+   if(diagnosticTarget != null) { cb.ClearRandomWriteTargets(); cb.SetGlobalFloat("_FTFX_CA_DebugAvailable",0); }
    camera.AddCommandBuffer(CameraEvent.AfterEverything,cb);
    camera.Render();
    camera.RemoveCommandBuffer(CameraEvent.AfterEverything,cb);
@@ -162,6 +165,7 @@ public static partial class AmbientValidation
    CheckFillAO();
    CheckFoliage();
    CheckLightingBlend();
+   CheckBentNormals();
    File.WriteAllText("validation.txt","PASSED "+checks+" D3D11 shader checks. Worst strength-zero native parity error: "+worst+"\nGPU: "+SystemInfo.graphicsDeviceName);
    Debug.Log(File.ReadAllText("validation.txt"));
    UnityEngine.Object.DestroyImmediate(camera.gameObject);UnityEngine.Object.DestroyImmediate(quad);

@@ -9,7 +9,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Experimental.Rendering;
 
-public static class OcclusionValidation
+public static partial class OcclusionValidation
 {
  private static readonly List<string> results=new List<string>();
  public static void Run()
@@ -31,6 +31,9 @@ public static class OcclusionValidation
    using(var assets=new GpuAssets(Path.GetFullPath("Output/Plugin.dll")))
    {
     Composition(assets);
+    AmbientDrawInstrumentation(assets);
+    BentPipeline(assets);
+    BentCameraIsolation(assets);
     ActorEquivalence(assets,256,144);
     ActorEquivalence(assets,259,147);
     CameraLifecycle(assets);
@@ -182,8 +185,20 @@ public static class OcclusionValidation
     Require(Shader.GetGlobalFloat("_FTFX_CA_MaterialCaptured")==0 && Shader.GetGlobalFloat("_FTFX_CA_SeparateAOAvailable")==0,"per-camera ambient globals leaked");
    }
    writer.Clear();
-   foreach(var view in new[]{OcclusionView.Normal,OcclusionView.Depth,OcclusionView.BeforeBlur,OcclusionView.AfterBlur,OcclusionView.CombinedAO,OcclusionView.SecondPassAO})
-   { settings.View.Value=view;effect.Record(settings,2,true);camera.Render();Require(effect.Active,"inactive camera"); }
+   foreach(var view in new[]{OcclusionView.Normal,OcclusionView.Depth,OcclusionView.BeforeBlur,OcclusionView.AfterBlur,OcclusionView.CombinedAO,OcclusionView.SecondPassAO,OcclusionView.BentNormals,OcclusionView.BentSHDifference,OcclusionView.BentLightingDifference,OcclusionView.AmbientDirectional,OcclusionView.AmbientUpward,OcclusionView.AmbientFill,OcclusionView.AmbientInteriorTransmission,OcclusionView.AmbientShares})
+   { settings.View.Value=view;effect.Record(settings,2,true);camera.Render();Require(effect.Active,"inactive camera");
+     if(settings.LightingDebug) { var color=Read(effect.DebugTexture);Require(color.r==0 && color.g==1 && color.b==1,"Missing actual ambient draw must remain cyan"); }
+   }
+   settings.BentNormals.Value=true;
+   foreach(int mode in new[]{0,1,2,3,4,0})
+   {
+    settings.Ambient.Value=mode!=1; settings.AmbientStrength.Value=mode==2?0:.6f;
+    settings.BentNormals.Value=mode!=3;
+    effect.Record(settings,2,mode!=4);camera.Render();
+    var field=typeof(CameraOcclusion).GetField("primary",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);
+    Require(((OcclusionPipeline)field.GetValue(effect)).BentNormals==(mode==0),"bent-normal gating failed mode="+mode);
+    Require(Shader.GetGlobalFloat("_FTFX_CA_BentAvailable")==0,"bent globals leaked after camera");
+   }
    settings.Actors.Value=false;settings.Ambient.Value=false;effect.Record(settings,2,true);camera.Render();
    Require(!effect.AmbientActive,"ambient not disabled");
    var replacement=new RenderTexture(131,99,24,RenderTextureFormat.ARGBHalf);replacement.Create();camera.targetTexture=replacement;
@@ -194,7 +209,7 @@ public static class OcclusionValidation
   camera.RemoveCommandBuffer(CameraEvent.AfterGBuffer,writer);writer.Dispose();UnityEngine.Object.DestroyImmediate(stencil);
   Require(camera.GetCommandBuffers(CameraEvent.BeforeGBuffer).Length==0 && camera.GetCommandBuffers(CameraEvent.BeforeImageEffectsOpaque).Length==0,"camera command buffers leaked");
   DestroyScene(camera,target,geometry);
-  results.Add("PASS: original material capture, stencil classes 0/1/2/3, camera-global reset, all six debug views, actor/ambient toggles, resize and command-buffer cleanup.");
+  results.Add("PASS: original material capture, stencil classes 0/1/2/3, camera-global reset, all fourteen debug views, bent toggles/gates, actor/ambient toggles, resize and command-buffer cleanup.");
  }
  private static void DestroyScene(Camera camera,RenderTexture target,GameObject[] geometry)
  {
@@ -214,6 +229,14 @@ public static class OcclusionValidation
    integration.Initialize();
    manager.SetSSAO(EFT.Settings.Graphics.ESSAOMode.HighQuality);camera.Render();
    Require(!native1.enabled && !native2.enabled && camera.GetCommandBuffers(CameraEvent.BeforeImageEffectsOpaque).Length==1,"replacement does not own AO");
+   var bindingsField=typeof(XeGTAOIntegration).GetField("bindings",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);
+   foreach(int quality in new[]{0,1,2,3}) foreach(var nativeQuality in new[]{EFT.Settings.Graphics.ESSAOMode.FastestPerformance,EFT.Settings.Graphics.ESSAOMode.HighestQuality})
+   {
+    settings.Quality.Value=quality;manager.SetSSAO(nativeQuality);camera.Render();
+    var bindings=(System.Collections.IDictionary)bindingsField.GetValue(integration);var binding=bindings[manager];
+    var effect=(CameraOcclusion)binding.GetType().GetField("Effect",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(binding);
+    Require(effect.LastQuality==quality,"Tarkov quality overrode FTFX slider");
+   }
    settings.Enabled.Value=false;integration.Update();
    Require(native1.enabled && native2.enabled && camera.GetCommandBuffers(CameraEvent.BeforeImageEffectsOpaque).Length==0,"toggle did not restore native AO");
    settings.Enabled.Value=true;integration.Update();camera.Render();

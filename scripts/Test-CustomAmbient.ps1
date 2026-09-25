@@ -8,7 +8,10 @@ $project = Join-Path $repo 'obj\CustomAmbientValidation'
 foreach($folder in @('Assets\Editor','Packages','ProjectSettings','AssetBundles')) {
  New-Item -ItemType Directory -Force (Join-Path $project $folder) | Out-Null
 }
+New-Item -ItemType Directory -Force (Join-Path $project 'Assets\XeGTAO') | Out-Null
+Copy-Item (Join-Path $repo 'unity\Assets\XeGTAO\BentNormals.hlsl') (Join-Path $project 'Assets\XeGTAO') -Force
 Copy-Item (Join-Path $repo 'unity\Assets\CustomAmbient.shader') (Join-Path $project 'Assets') -Force
+Copy-Item (Join-Path $repo 'unity\CustomAmbientValidation\*.compute') (Join-Path $project 'Assets\Editor') -Force
 Copy-Item (Join-Path $repo 'unity\CustomAmbientValidation\*.cs') (Join-Path $project 'Assets\Editor') -Force
 Set-Content (Join-Path $project 'Packages\manifest.json') '{"dependencies":{"com.unity.modules.assetbundle":"1.0.0","com.unity.modules.imageconversion":"1.0.0","com.unity.modules.imgui":"1.0.0"}}'
 Set-Content (Join-Path $project 'ProjectSettings\ProjectVersion.txt') 'm_EditorVersion: 2022.3.43f1'
