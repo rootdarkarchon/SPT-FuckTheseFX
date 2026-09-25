@@ -1,10 +1,11 @@
 param([string]$SptInstallPath = 'D:\Tarkov-SPT-4.1')
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
-$assets = @('distantshadows')
+$assets = @('distantshadows','occlusion')
 & dotnet build (Join-Path $repo 'FuckTheseFX.csproj') -c Release "-p:SptInstallPath=$SptInstallPath" --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
 & (Join-Path $PSScriptRoot 'Test-Configuration.ps1') -SptInstallPath $SptInstallPath
+& (Join-Path $PSScriptRoot 'Test-OcclusionContracts.ps1') -SptInstallPath $SptInstallPath
 & (Join-Path $PSScriptRoot 'Test-BloomContracts.ps1') -SptInstallPath $SptInstallPath
 & (Join-Path $PSScriptRoot 'Test-DistantShadowContracts.ps1') -SptInstallPath $SptInstallPath
 & (Join-Path $PSScriptRoot 'Test-AmbientHighlightContracts.ps1') -SptInstallPath $SptInstallPath
@@ -17,14 +18,15 @@ try {
     $attribute = $plugin.CustomAttributes | Where-Object { $_.AttributeType.FullName -eq 'BepInEx.BepInPlugin' }
     if ($attribute.ConstructorArguments[0].Value -ne 'com.rootdarkarchon.fuckthesefx' -or $attribute.ConstructorArguments[2].Value -ne $version) { throw 'Plugin identity/version mismatch' }
     if ($assembly.MainModule.AssemblyReferences | Where-Object Name -match 'SPTAOReplacer|FuckingCustomAmbient') { throw 'Unexpected AO plugin dependency' }
-    foreach ($name in @('AmbientHighlightIntegration','BloomResolutionIntegration','DistantShadowSamplingIntegration','DistantShadowResolutionIntegration')) {
+    foreach ($name in @('AmbientHighlightIntegration','BloomResolutionIntegration','DistantShadowSamplingIntegration','DistantShadowResolutionIntegration','XeGTAOIntegration','AmbientOcclusionBridge')) {
         if (-not ($assembly.MainModule.Types | Where-Object Name -eq $name)) { throw "Missing integration: $name" }
     }
-    if ($assembly.MainModule.Types | Where-Object FullName -match 'AmplifyOcclusion|XeGTAO|CustomAmbientIntegration') { throw 'AO runtime leaked into FX plugin' }
+    if ($assembly.MainModule.Types | Where-Object FullName -match 'AmplifyOcclusion|AmplifyGTAO') { throw 'Amplify code leaked into FX plugin' }
     Write-Output 'Verified plugin GUID, version, all FX hooks and independence from AO Replacer.'
 } finally { $assembly.Dispose() }
 $expected = @{
     'BepInEx/plugins/FuckTheseFX/FuckTheseFX.dll' = $built
+    'BepInEx/plugins/FuckTheseFX/Licenses/XeGTAO.txt' = (Join-Path $repo 'unity\Assets\XeGTAO\Upstream\LICENSE')
 }
 foreach ($asset in $assets) { $expected["BepInEx/plugins/FuckTheseFX/Assets/$asset"] = Join-Path $repo "Assets\$asset" }
 $zip = Join-Path $repo "bin\Release\FuckTheseFX-$version-SPT4.1.zip"

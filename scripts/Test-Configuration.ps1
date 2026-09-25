@@ -6,7 +6,6 @@ Add-Type -Path (Join-Path $SptInstallPath 'BepInEx\core\BepInEx.dll')
 $assembly = [Reflection.Assembly]::LoadFrom((Join-Path $repo 'bin\Release\netstandard2.1\FuckTheseFX.dll'))
 $plugin = $assembly.GetType('FuckTheseFX.Plugin', $true)
 $bind = $plugin.GetMethod('BindSettings', [Reflection.BindingFlags]'Static,NonPublic')
-$import = $plugin.GetMethod('ImportLegacySettings', [Reflection.BindingFlags]'Static,NonPublic')
 $testRoot = Join-Path $repo 'obj\ConfigurationChecks'
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 $path = Join-Path $testRoot 'fresh.cfg'
@@ -15,6 +14,29 @@ $config = [BepInEx.Configuration.ConfigFile]::new($path,$false)
 $config.SaveOnConfigSet = $false
 $bindArgs = [object[]]::new(1); $bindArgs[0] = $config; $bind.Invoke($null, $bindArgs)
 $expected = @{
+    'XeGTAO/Enabled' = 'True'
+    'XeGTAO/FinalPower' = '1.5'
+    'XeGTAO/EffectRadius' = '1'
+    'XeGTAO/RadiusMultiplier' = '1.457'
+    'XeGTAO/FalloffRange' = '0.615'
+    'XeGTAO/SampleDistributionPower' = '2.5'
+    'XeGTAO/SliceCount' = '0'
+    'XeGTAO/SamplesPerSlice' = '0'
+    'XeGTAO/ThicknessHeuristic' = '0'
+    'XeGTAO/Denoise passes' = '2'
+    'XeGTAO/DenoiseSharpness' = '0.4'
+    'XeGTAO/UseNormals' = 'True'
+    'CustomAmbient fix/Enabled' = 'True'
+    'CustomAmbient fix/Strength' = '0.6'
+    'CustomAmbient fix/Foliage AO strength' = '0.65'
+    'Actor second AO pass/Enabled' = 'True'
+    'Actor second AO pass/Radius' = '0.3'
+    'Actor second AO pass/Strength' = '1.5'
+    'Actor second AO pass/Response' = '0.6'
+    'Actor second AO pass/Distance cutoff' = '10'
+    'Debug/View' = 'Normal'
+    'Debug/Depth range' = '5'
+    'Debug/Depth start' = '0'
     'Ambient Highlight/Enabled' = 'False'
     'Ultimate Bloom/Bloom input scale' = '0.67'
     'Ultimate Bloom/Enabled' = 'True'
@@ -26,13 +48,13 @@ $expected = @{
     'Distant Shadows/Half filter samples' = '12'
     'Distant Shadows/Full filter samples' = '8'
 }
-if ($config.Count -ne 10) { throw 'Unexpected setting count' }
+if ($config.Count -ne 33) { throw 'Unexpected setting count' }
 foreach ($definition in $config.Keys) {
     $entry = $config[$definition]
     $name = "$($definition.Section)/$($definition.Key)"
     if (-not $expected.ContainsKey($name) -or $entry.DefaultValue.ToString() -ne $expected[$name]) { throw "Wrong default: $name" }
     $advanced = @($entry.Description.Tags | Where-Object { $_.GetType().GetField('IsAdvanced').GetValue($_) -eq $true }).Count -eq 1
-    if ($advanced -ne ($definition.Key -match '^(Adjust filter samples|(Quarter|Half|Full) filter samples)$')) { throw "Incorrect advanced visibility: $name" }
+    if ($advanced -ne ($definition.Key -match '^(Adjust filter samples|(Quarter|Half|Full) filter samples)$' -or $definition.Section -in @('CustomAmbient fix','Debug') -or ($definition.Section -in @('XeGTAO','Actor second AO pass') -and $definition.Key -ne 'Enabled'))) { throw "Incorrect advanced visibility: $name" }
 }
 function Entry($section,$key) { $config[[BepInEx.Configuration.ConfigDefinition]::new($section,$key)] }
 foreach ($key in @('Quarter filter samples','Half filter samples','Full filter samples')) {
@@ -41,21 +63,16 @@ foreach ($key in @('Quarter filter samples','Half filter samples','Full filter s
 }
 $scale = Entry 'Ultimate Bloom' 'Bloom input scale'
 if ($scale.Description.AcceptableValues.Clamp([single].1) -ne .25 -or $scale.Description.AcceptableValues.Clamp([single]2) -ne 1) { throw 'Bloom bounds changed' }
-$legacyPath = Join-Path $testRoot 'legacy.cfg'
-[IO.File]::WriteAllText($legacyPath, "[Ultimate Bloom]`nInput resolution scale = 0.7`nUse native resolution = true`n[Distant Shadows]`nMask resolution = Half`nAdjust filter samples = false`nQuarter filter samples = 19`nHalf filter samples = 11`nFull filter samples = 6`n[Ambient Highlight]`nEnabled = false`n[Ambient Occlusion]`nBackend = Vanilla`n")
-$before = (Get-FileHash -LiteralPath $legacyPath).Hash
-$importArgs = [object[]]::new(2); $importArgs[0] = $config; $importArgs[1] = [string]$legacyPath; $import.Invoke($null, $importArgs)
-if ((Get-FileHash -LiteralPath $legacyPath).Hash -ne $before) { throw 'Migration modified the old config' }
-if ((Entry 'Ambient Highlight' 'Enabled').BoxedValue -or -not (Entry 'Ultimate Bloom' 'Use native resolution').BoxedValue -or [Math]::Abs($scale.BoxedValue - .7) -gt .00001) { throw 'Highlight/bloom migration failed' }
-foreach ($pair in @(@('Resolution','Half'),@('Adjust filter samples','False'),@('Quarter filter samples','19'),@('Half filter samples','11'),@('Full filter samples','6'))) {
-    if ((Entry 'Distant Shadows' $pair[0]).BoxedValue.ToString() -ne $pair[1]) { throw "Shadow migration failed: $($pair[0])" }
-}
+$radiusEntry = Entry 'XeGTAO' 'EffectRadius'
+$radiusEntry.SetSerializedValue('0.55')
+$enabledEntry = Entry 'XeGTAO' 'Enabled'
+$enabledEntry.SetSerializedValue('false')
 $config.Save()
 $saved = [BepInEx.Configuration.ConfigFile]::new($path,$false)
 $saved.SaveOnConfigSet = $false
 $bindArgs[0] = $saved; $bind.Invoke($null,$bindArgs)
 foreach ($definition in $config.Keys) { if ($saved[$definition].GetSerializedValue() -ne $config[$definition].GetSerializedValue()) { throw 'Saved preference did not survive reload' } }
-Write-Output 'Verified ten FX settings, six normal controls, defaults, bounds, saved preferences and read-only legacy import.'
+Write-Output 'Verified 33 settings, eight normal controls, defaults, bounds and saved preferences. No AOReplacer import.'
 
 $enum = $assembly.GetType('FuckTheseFX.Source.DistantShadows.DistantShadowMaskResolution', $true)
 if ([Enum]::GetNames($enum) -join ',' -ne 'Quarter,Half,Full') { throw 'Unexpected resolution option' }

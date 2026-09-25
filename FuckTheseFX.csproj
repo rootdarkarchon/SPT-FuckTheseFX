@@ -3,9 +3,9 @@
     <TargetFramework>netstandard2.1</TargetFramework>
     <RootNamespace>FuckTheseFX</RootNamespace>
     <AssemblyName>FuckTheseFX</AssemblyName>
-    <Version>1.0.3</Version>
-    <AssemblyVersion>1.0.3</AssemblyVersion>
-    <FileVersion>1.0.3</FileVersion>
+    <Version>1.1.0</Version>
+    <AssemblyVersion>1.1.0</AssemblyVersion>
+    <FileVersion>1.1.0</FileVersion>
     <Authors>rootdarkarchon</Authors>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
@@ -16,6 +16,9 @@
   <ItemGroup>
     <Compile Remove="unity\**\*.cs" />
     <None Update="Assets\distantshadows" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Assets\occlusion" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="unity\Assets\XeGTAO\Upstream\LICENSE" Link="Licenses\XeGTAO.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Reference Include="UnityEngine.IMGUIModule"><HintPath>$(SptInstallPath)\EscapeFromTarkov_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath></Reference>
     <Reference Include="BepInEx"><HintPath>$(SptInstallPath)\BepInEx\core\BepInEx.dll</HintPath></Reference>
     <Reference Include="0Harmony"><HintPath>$(SptInstallPath)\BepInEx\core\0Harmony.dll</HintPath></Reference>
     <Reference Include="Assembly-CSharp"><HintPath>$(SptInstallPath)\EscapeFromTarkov_Data\Managed\Assembly-CSharp.dll</HintPath></Reference>

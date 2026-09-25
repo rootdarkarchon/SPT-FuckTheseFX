@@ -5,14 +5,16 @@ using BepInEx.Logging;
 using FuckTheseFX.Source.Highlight;
 using FuckTheseFX.Source.Bloom;
 using FuckTheseFX.Source.DistantShadows;
+using FuckTheseFX.Source.Occlusion;
 
 namespace FuckTheseFX
 {
     [BepInPlugin(Guid, "Fuck These FX", Version)]
+    [BepInDependency("com.matsix.sptaoreplacer", BepInDependency.DependencyFlags.SoftDependency)]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Guid = "com.rootdarkarchon.fuckthesefx";
-        public const string Version = "1.0.3";
+        public const string Version = "1.1.0";
         internal static ManualLogSource MyLog;
         internal static ConfigEntry<bool> AmbientHighlightEnabled, BloomUseNativeResolution, DistantShadowSamplingEnabled;
         internal static ConfigEntry<bool> BloomEnabled, DistantShadowsEnabled;
@@ -23,13 +25,13 @@ namespace FuckTheseFX
         private BloomResolutionIntegration bloom;
         private DistantShadowSamplingIntegration sampling;
         private DistantShadowResolutionIntegration resolution;
+        internal static OcclusionSettings Occlusion;
+        private XeGTAOIntegration occlusion;
 
         private void Awake()
         {
             MyLog = Logger;
-            bool firstRun = !File.Exists(Config.ConfigFilePath);
             BindSettings(Config);
-            if (firstRun) ImportLegacySettings(Config, Path.Combine(Path.GetDirectoryName(Config.ConfigFilePath), "com.matsix.sptaoreplacer.cfg"));
             highlight = new AmbientHighlightIntegration();
             bloom = new BloomResolutionIntegration();
             sampling = new DistantShadowSamplingIntegration();
@@ -38,6 +40,13 @@ namespace FuckTheseFX
             FeatureStartup.TryInitialize("Bloom", bloom.Initialize);
             FeatureStartup.TryInitialize("Distant shadow sampling", () => sampling.Initialize(Info.Location));
             FeatureStartup.TryInitialize("Distant shadow resolution", resolution.Initialize);
+            if (BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey("com.matsix.sptaoreplacer"))
+                Logger.LogInfo("AOReplacer is installed: FuckTheseFX XeGTAO, actor AO and CustomAmbient are bypassed. Other FX remain active.");
+            else
+            {
+                occlusion = new XeGTAOIntegration(Info.Location, Occlusion);
+                FeatureStartup.TryInitialize("XeGTAO", occlusion.Initialize);
+            }
         }
 
         internal static void BindSettings(ConfigFile config)
@@ -69,6 +78,7 @@ namespace FuckTheseFX
             MigrateRenamedSetting(saved, DistantShadowResolution, "Mask resolution");
             if (!System.Enum.IsDefined(typeof(DistantShadowMaskResolution), DistantShadowResolution.Value))
                 DistantShadowResolution.Value = DistantShadowMaskResolution.Half;
+            Occlusion = new OcclusionSettings(config);
         }
 
         private static void MigrateRenamedSetting(ConfigFile saved, ConfigEntryBase target, string oldKey)
@@ -78,27 +88,6 @@ namespace FuckTheseFX
             if (saved.Bind(target.Definition, missing).Value != missing) return;
             string value = saved.Bind(target.Definition.Section, oldKey, missing).Value;
             if (value != missing) target.SetSerializedValue(value);
-        }
-
-        // Import only on first launch; the existing AO Replacer config is read-only.
-        internal static void ImportLegacySettings(ConfigFile config, string legacyPath)
-        {
-            if (!File.Exists(legacyPath)) return;
-            var legacy = new ConfigFile(legacyPath, false) { SaveOnConfigSet = false };
-            foreach (var definition in config.Keys)
-            {
-                var entry = config[definition];
-                var oldDefinition = definition;
-                if (definition.Section == "Ultimate Bloom" && definition.Key == "Bloom input scale")
-                    oldDefinition = new ConfigDefinition(definition.Section, "Input resolution scale");
-                if (definition.Section == "Distant Shadows" && definition.Key == "Resolution")
-                    oldDefinition = new ConfigDefinition(definition.Section, "Mask resolution");
-                string value = legacy.Bind(oldDefinition, entry.GetSerializedValue()).Value;
-                entry.SetSerializedValue(value);
-            }
-            if (!System.Enum.IsDefined(typeof(DistantShadowMaskResolution), DistantShadowResolution.Value))
-                DistantShadowResolution.Value = DistantShadowMaskResolution.Half;
-            MyLog?.LogInfo("Imported existing FX preferences from AO Replacer.");
         }
 
         private static ConfigEntry<T> BindAdvanced<T>(ConfigFile config, string section, string key, T value, string description) =>
@@ -111,11 +100,13 @@ namespace FuckTheseFX
         private void Update()
         {
             highlight?.Update(); sampling?.Update(); resolution?.Update();
+            occlusion?.Update();
         }
 
         private void OnDestroy()
         {
-            sampling?.Dispose(); resolution?.Dispose(); highlight?.Dispose(); bloom?.Dispose();
+            occlusion?.Dispose(); sampling?.Dispose(); resolution?.Dispose(); highlight?.Dispose(); bloom?.Dispose();
         }
+        private void OnGUI() => occlusion?.DrawDiagnostic();
     }
 }

@@ -1,0 +1,124 @@
+Shader "Hidden/FuckTheseFX/WriteScreenAmbient"
+{
+ Properties {
+  [HideInInspector] _MainTex ("Capture source", 2D) = "white" {}
+  _StencilType ("_StencilType", Float) = 1
+  _AmbientBlur ("_AmbientBlur", Float) = 1
+  _ReflectionIntensity ("_ReflectionIntensity", Float) = 1
+  _FTFX_CA_FoliageStrength ("Foliage AO strength", Range(0,1)) = .65
+  _FTFX_CAAmount ("Diffuse occlusion strength", Range(0,1)) = 1
+ }
+ SubShader {
+  CGINCLUDE
+   #include "UnityCG.cginc"
+
+   sampler2D _CameraDepthTexture, _StencilShadow;
+   sampler2D _CameraGBufferTexture0, _CameraGBufferTexture1, _CameraGBufferTexture2;
+   sampler2D _CameraMotionVectorsDepth;
+   sampler2D _FTFX_CA_OriginalOcclusion, _FTFX_CA_ScreenAO;
+   float _FTFX_CA_MaterialCaptured, _FTFX_CA_SeparateAOAvailable, _FTFX_CA_FoliageStrength;
+   float4 _FTFX_CA_AODecode, _FTFX_CA_AOFade;
+   float SeparateVisibility(float2 uv) {
+    float2 raw = tex2D(_FTFX_CA_ScreenAO,uv).rg;
+    float fade = saturate(max(raw.y * _FTFX_CA_AODecode.z - _FTFX_CA_AOFade.x,0) * _FTFX_CA_AOFade.y);
+    float power = lerp(_FTFX_CA_AODecode.y,_FTFX_CA_AOFade.w,fade);
+    float intensity = lerp(_FTFX_CA_AODecode.x,_FTFX_CA_AOFade.z,fade);
+    return saturate(1 + (pow(max(raw.x,0),power)-1)*intensity);
+   }
+   samplerCUBE _MyGlobalReflectionProbe;
+   float4 _SHAr, _SHAg, _SHAb, _SHBr, _SHBg, _SHBb, _SHC;
+   float _ReflectionBottomShade, _AmbientBlur, _ReflectionIntensity;
+   float TOD_Fogginess, _NightVisionOn, _FTFX_CAAmount;
+   float3 _SunDirection;
+   struct Varyings { float4 pos:SV_POSITION; float4 screen:TEXCOORD0; float3 ray:TEXCOORD1; };
+   Varyings Vert(float4 vertex:POSITION) {
+    Varyings o;
+    float4 clip = mul(glstate_matrix_projection, float4(vertex.xy, -.1, vertex.w));
+    o.pos = clip; o.pos.z = .1;
+    o.screen = ComputeScreenPos(clip);
+    o.ray = mul((float3x3)unity_CameraToWorld, float3(vertex.xy * 10, 1) * _ProjectionParams.z);
+    return o;
+   }
+   float3 ToAmbientGamma(float3 value) {
+    return max(1.055 * pow(max(value, 0), 1.0 / 2.4) - .055, 0);
+   }
+   float3 AmbientSH(float3 normal) {
+    float4 n = float4(normal, 1);
+    float4 quadratic = normal.yzzx * normal.xyzz;
+    float3 result = float3(dot(_SHAr,n),dot(_SHAg,n),dot(_SHAb,n));
+    result += float3(dot(_SHBr,quadratic),dot(_SHBg,quadratic),dot(_SHBb,quadratic));
+    result += _SHC.rgb * (normal.x * normal.x - normal.y * normal.y);
+    return ToAmbientGamma(result);
+   }
+   float4 Frag(Varyings input):SV_Target {
+    float2 uv = input.screen.xy / input.screen.w;
+    float depth = tex2D(_CameraDepthTexture,uv).r;
+    float3 viewDirection = normalize(input.ray * Linear01Depth(depth));
+    float3 normal = tex2D(_CameraGBufferTexture2,uv).xyz * 2 - 1;
+    float3 unitNormal = normalize(normal);
+    float4 spec = tex2D(_CameraGBufferTexture1,uv);
+    float4 albedo = tex2D(_CameraGBufferTexture0,uv);
+    float visibility = 1 - tex2D(_StencilShadow,uv).a;
+
+    // Preserve EFT's reflection path, including its existing material/screen AO use.
+    float fresnel = pow(1 - abs(dot(unitNormal,-viewDirection)),5);
+    float3 reflectance = lerp(spec.rgb, saturate(max(max(spec.r,spec.g),spec.b) + spec.a), fresnel);
+    float roughness = 1 - spec.a;
+    float3 reflectedRay = reflect(viewDirection,unitNormal);
+    float lod = 6 * roughness * (1.7 - .7 * roughness);
+    float3 reflection = texCUBElod(_MyGlobalReflectionProbe,float4(reflectedRay,lod)).rgb;
+    reflection *= saturate(reflectedRay.y + _ReflectionBottomShade);
+    reflection *= albedo.a * (1 - .28 * max(roughness * roughness,.002) * roughness);
+    reflection *= reflectance * _ReflectionIntensity;
+    reflection *= tex2D(_CameraMotionVectorsDepth,uv).r >= depth - .00001 ? .25 : 1;
+    reflection *= _ReflectionIntensity == 1 && albedo.a < .5 ? 2 * albedo.a : 1;
+    reflection *= visibility;
+
+    float3 upward = ToAmbientGamma(float3(_SHAr.y+_SHAr.w,_SHAg.y+_SHAg.w,_SHAb.y+_SHAb.w)-_SHC.rgb);
+    float3 diffuse = lerp(AmbientSH(normal),upward,1-pow(visibility,_AmbientBlur)) * albedo.rgb * visibility;
+    float luminance = dot(albedo.rgb,float3(.2126,.7152,.0722));
+    float fill = luminance * luminance * (.05 + .05 * max(TOD_Fogginess*1.5,_NightVisionOn)) * (1-abs(_SunDirection.y));
+
+    // Diffuse ambient and fill share the same visibility, strength and material compatibility.
+    // Classify BEFORE screen AO, never by the final alpha: real screen occlusion can also be zero.
+    // Native zero-alpha materials suppress reflections; that zero is not diffuse ambient visibility.
+    float ao = 1;
+    if (_FTFX_CA_MaterialCaptured > .5) {
+     float original = tex2D(_FTFX_CA_OriginalOcclusion,uv).r;
+     float visibilityAO = saturate(albedo.a);
+     if (original < (.5 / 255.0))
+      visibilityAO = _FTFX_CA_SeparateAOAvailable > .5 ? lerp(1,SeparateVisibility(uv),_FTFX_CA_FoliageStrength) : 1;
+     ao = lerp(1,visibilityAO,_FTFX_CAAmount);
+    }
+    float3 ambient = reflection + diffuse * ao + fill * ao;
+    #ifdef UNITY_HDR_ON
+     return float4(ambient,0);
+    #else
+     return exp2(-float4(ambient,0));
+    #endif
+   }
+  ENDCG
+  Pass {
+   Name "Ambient"
+   ZTest Always ZWrite Off Cull Off
+   Blend [_SrcBlend] [_DstBlend]
+   CGPROGRAM
+   #pragma target 4.0
+   #pragma vertex Vert
+   #pragma fragment Frag
+   #pragma multi_compile __ UNITY_HDR_ON
+   ENDCG
+  }
+  Pass {
+   Name "CaptureMaterialOcclusion"
+   ZTest Always ZWrite Off Cull Off Blend Off
+   CGPROGRAM
+   #pragma vertex vert_img
+   #pragma fragment Capture
+   sampler2D _MainTex;
+   float4 Capture(v2f_img input):SV_Target { return tex2D(_MainTex,input.uv).aaaa; }
+   ENDCG
+  }
+ }
+ Fallback Off
+}

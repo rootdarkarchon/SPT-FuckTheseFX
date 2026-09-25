@@ -1,0 +1,161 @@
+// Unity/D3D11 adapter for Intel XeGTAO. See Upstream/README.md for compatibility edits.
+#pragma kernel Prefilter
+#pragma kernel Low
+#pragma kernel Medium
+#pragma kernel High
+#pragma kernel Ultra
+#pragma kernel Custom XE_GTAO_DYNAMIC_SAMPLE_COUNTS
+#pragma kernel Denoise
+#pragma kernel DenoiseLast
+#pragma kernel ActorTiles
+#pragma only_renderers d3d11
+
+#define VA_SATURATE saturate
+#define XE_GTAO_USE_HALF_FLOAT_PRECISION 0
+#define XE_GTAO_FP32_DEPTHS 1
+#define XE_GTAO_USE_DEFAULT_CONSTANTS 0
+#include "Upstream/XeGTAO.hlsli"
+
+float4 _XeViewport; // size.xy, reciprocal size.zw
+float4 _XeDepthAndRadius; // depth unpack multiply/add, radius, denoise beta
+float4 _XeNDCToView; // multiply.xy, add.zw
+float4 _XeTuning; // radius multiplier, falloff range, sample distribution power, thin-occluder compensation
+float4 _XeSampling; // slices, steps per side per slice
+float4x4 _XeWorldToView;
+int _XeNormalSource;
+float _XeFarDepth;
+float _XeFinalPower;
+
+Texture2D<float> _XeRawDepth;
+Texture2D<float4> _XeNormals;
+SamplerState sampler_PointClamp;
+RWTexture2D<lpfloat> _XeMip0, _XeMip1, _XeMip2, _XeMip3, _XeMip4;
+Texture2D<lpfloat> _XeDepth;
+RWTexture2D<uint> _XeOutAO;
+RWTexture2D<unorm float> _XeOutEdges;
+Texture2D<uint> _XeAO;
+Texture2D<lpfloat> _XeEdges;
+Texture2D<float> _XeActorMask;
+Texture2D<uint> _XeTiles;
+RWTexture2D<uint> _XeOutTiles;
+int _XeActorOnly;
+float _XeActorCutoff;
+groupshared uint actorPresent;
+
+// Classification has no CPU readback. Every tile is overwritten on every frame.
+[numthreads(8, 8, 1)]
+void ActorTiles(uint2 pixel : SV_DispatchThreadID, uint2 local : SV_GroupThreadID, uint2 tile : SV_GroupID)
+{
+    if (all(local == 0)) actorPresent = 0;
+    GroupMemoryBarrierWithGroupSync();
+    if (all(pixel < (uint2)_XeViewport.xy) && _XeActorMask.Load(int3(pixel, 0)) > .5 &&
+        _XeDepth.Load(int3(pixel, 0)) < _XeActorCutoff * 1.002)
+        InterlockedOr(actorPresent, 1);
+    GroupMemoryBarrierWithGroupSync();
+    if (all(local == 0)) _XeOutTiles[tile] = actorPresent;
+}
+
+bool ActorHalo(uint2 pixel)
+{
+    int2 tile = pixel / 8;
+    uint active = 0;
+    // One complete neighboring tile retains every raw AO/edge sample needed by
+    // the single actor denoiser, including its quad gathers at tile boundaries.
+    [unroll] for (int y = -1; y <= 1; y++)
+        [unroll] for (int x = -1; x <= 1; x++)
+            active |= _XeTiles.Load(int3(tile + int2(x,y), 0));
+    return active != 0;
+}
+
+GTAOConstants Constants()
+{
+    GTAOConstants c = (GTAOConstants)0;
+    c.ViewportSize = (int2)_XeViewport.xy;
+    c.ViewportPixelSize = _XeViewport.zw;
+    c.DepthUnpackConsts = _XeDepthAndRadius.xy;
+    c.NDCToViewMul = _XeNDCToView.xy;
+    c.NDCToViewAdd = _XeNDCToView.zw;
+    c.CameraTanHalfFOV = abs(c.NDCToViewMul) * 0.5;
+    c.NDCToViewMul_x_PixelSize = c.NDCToViewMul * c.ViewportPixelSize;
+    c.EffectRadius = _XeDepthAndRadius.z;
+    c.EffectFalloffRange = _XeTuning.y;
+    c.RadiusMultiplier = _XeTuning.x;
+    c.FinalValuePower = _XeFinalPower;
+    c.SampleDistributionPower = _XeTuning.z;
+    c.ThinOccluderCompensation = _XeTuning.w;
+    c.DepthMIPSamplingOffset = XE_GTAO_DEFAULT_DEPTH_MIP_SAMPLING_OFFSET;
+    c.DenoiseBlurBeta = _XeDepthAndRadius.w;
+    // Fixed Hilbert/R2 noise: this backend does not own temporal accumulation.
+    c.NoiseIndex = 0;
+    return c;
+}
+
+float3 LoadNormal(uint2 pixel, GTAOConstants c)
+{
+    if (_XeNormalSource != 2)
+        return XeGTAO_ComputeViewspaceNormal(pixel, c, _XeRawDepth, sampler_PointClamp);
+    float3 normal = _XeNormals.Load(int3(pixel, 0)).xyz * 2 - 1;
+    normal = mul((float3x3)_XeWorldToView, normal);
+    // Unity's camera depth UV convention and negative forward Z require reflecting
+    // view Y/Z into XeGTAO's coordinate system. Depth-reconstructed normals agree.
+    return normalize(normal * float3(1, -1, -1));
+}
+
+float2 Noise(uint2 pixel)
+{
+    uint index = HilbertIndex(pixel.x, pixel.y);
+    return frac(0.5 + index * float2(0.75487766624669276005, 0.56984029099805326591));
+}
+
+[numthreads(8, 8, 1)]
+void Prefilter(uint2 id : SV_DispatchThreadID, uint2 local : SV_GroupThreadID)
+{
+    // No early return: all threads must reach the upstream group barriers.
+    // D3D11 discards out-of-range UAV writes and the input sampler clamps at the edges.
+    XeGTAO_PrefilterDepths16x16(id, local, Constants(), _XeRawDepth, sampler_PointClamp,
+        _XeMip0, _XeMip1, _XeMip2, _XeMip3, _XeMip4);
+}
+
+void Calculate(uint2 pixel, float slices, float steps)
+{
+    if (any(pixel >= (uint2)_XeViewport.xy)) return;
+    if (_XeActorOnly != 0 && !ActorHalo(pixel))
+    {
+        _XeOutAO[pixel] = 170;
+        _XeOutEdges[pixel] = 0;
+        return;
+    }
+    if (_XeDepth.Load(int3(pixel, 0)) >= _XeFarDepth * 0.9999)
+    {
+        _XeOutAO[pixel] = 170; // 255 / XE_GTAO_OCCLUSION_TERM_SCALE
+        _XeOutEdges[pixel] = 0;
+        return;
+    }
+    GTAOConstants c = Constants();
+    XeGTAO_MainPass(pixel, slices, steps, Noise(pixel), LoadNormal(pixel, c), c,
+        _XeDepth, sampler_PointClamp, _XeOutAO, _XeOutEdges);
+}
+[numthreads(8, 8, 1)] void Low(uint2 p : SV_DispatchThreadID) { Calculate(p, 1, 2); }
+[numthreads(8, 8, 1)] void Medium(uint2 p : SV_DispatchThreadID) { Calculate(p, 2, 2); }
+[numthreads(8, 8, 1)] void High(uint2 p : SV_DispatchThreadID) { Calculate(p, 3, 3); }
+[numthreads(8, 8, 1)] void Ultra(uint2 p : SV_DispatchThreadID) { Calculate(p, 9, 3); }
+[numthreads(8, 8, 1)] void Custom(uint2 p : SV_DispatchThreadID) { Calculate(p, _XeSampling.x, _XeSampling.y); }
+
+[numthreads(8, 8, 1)]
+void Denoise(uint2 id : SV_DispatchThreadID)
+{
+    if (any(id * uint2(2, 1) >= (uint2)_XeViewport.xy)) return;
+    XeGTAO_Denoise(id * uint2(2, 1), Constants(), _XeAO, _XeEdges, sampler_PointClamp, _XeOutAO, false);
+}
+[numthreads(8, 8, 1)]
+void DenoiseLast(uint2 id : SV_DispatchThreadID)
+{
+    if (any(id * uint2(2, 1) >= (uint2)_XeViewport.xy)) return;
+    if (_XeActorOnly != 0 && _XeTiles.Load(int3(id * uint2(2,1) / 8, 0)) == 0)
+    {
+        _XeOutAO[id * uint2(2,1)] = 255;
+        _XeOutAO[id * uint2(2,1) + uint2(1,0)] = 255;
+        return;
+    }
+    XeGTAO_Denoise(id * uint2(2, 1), Constants(), _XeAO, _XeEdges, sampler_PointClamp, _XeOutAO, true);
+}
