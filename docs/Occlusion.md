@@ -2,7 +2,7 @@
 
 FuckTheseFX owns XeGTAO without an AOReplacer assembly, Amplify class, shader or render target. The Intel estimator and reviewed EFT 40743 CustomAmbient shader retain their provenance. Camera routing, allocation, deferred composition, fallback and configuration are implemented independently here.
 
-The normal AO controls are **XeGTAO / Enabled**, **XeGTAO / Quality** (0-3, default 3), and **Actor second AO pass / Enabled**. The previous eleven XeGTAO tuning options, four CustomAmbient settings, four actor tuning options, and three debug settings remain available under Advanced. Values come from FuckTheseFX's configuration and defaults; no AOReplacer config is read. The FTFX Quality slider (0-3, default 3) selects the 1/2/3/9-slice presets for both AO passes unless primary sampling counts are overridden.
+The normal AO controls are **XeGTAO / Enabled**, **XeGTAO / Quality** (0-3, default 3), and **XeGTAO / Second Pass Enabled**. The previous eleven XeGTAO tuning options, four CustomAmbient settings, four actor tuning options, and three debug settings remain available under Advanced. Values come from FuckTheseFX's configuration and defaults; no AOReplacer config is read. The FTFX Quality slider (0-3, default 3) selects the 1/2/3/9-slice presets for both AO passes unless primary sampling counts are overridden.
 
 AOReplacer is a soft dependency for load ordering only. When its plugin ID is present, no FuckTheseFX occlusion integration, shader bundle, camera hook, CustomAmbient patch or diagnostic overlay is initialized. Bloom, distant shadows and ambient highlight continue independently. The saved occlusion preferences remain available for a later launch without AOReplacer.
 
@@ -27,7 +27,7 @@ The actor composite reads filtered integer AO and linear depth directly. It pres
 
 The actor GPU fixtures compare more than 83,000 actor pixels at 256Ãƒâ€”144 and 259Ãƒâ€”147, including sparse, full, edge, moving, empty and distance-rejected masks. Sampled actor output is bit-identical to the full-frame estimator; the fused composite matches the former resolve/composite within 0.000001. These tests establish the tested shader contracts, not live EFT visual or FPS acceptance.
 
-Bent normals are optional (Advanced: CustomAmbient fix / Bent normals, off by default).
+Bent normals are optional (Advanced: XeGTAO / Custom Ambient Fix Bent normals, off by default).
 They steer only directional SH diffuse ambient; native upward blending, reflection, fill,
 scalar AO and the actor estimator keep their existing roles. Strength, foliage strength
 and the 35â€“100 m AO fade also scale this directional correction. Requires the CustomAmbient

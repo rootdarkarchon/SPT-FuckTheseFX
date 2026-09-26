@@ -11,12 +11,17 @@ namespace FuckTheseFX.Source.Occlusion
         private readonly GpuAssets assets;
         private readonly Material composite;
         private OcclusionPipeline primary, actor;
+        private ColorBleedPipeline bleed;
+        private bool bleedFailed, bleedUnsupportedWarned;
+        private static string lastBleedUnsupportedReason;
         private RenderTexture resolved, originalAlpha, actorMask, debug, rawDebug;
         private readonly CommandBuffer reset, capture, calculate, actors, cleanup;
         private int width, height;
         private CameraEvent calculationEvent;
         internal int LastQuality { get; private set; }
         internal RenderTexture DebugTexture => debug;
+        internal RenderTexture ColorBleedDebugTexture => bleed?.DebugTexture;
+        internal RenderTexture ColorBleedHistoryTexture => bleed?.HistoryDiagnosticTexture;
         internal RenderTexture LightingDebugTexture { get; private set; }
         internal bool Active { get; private set; }
         internal bool AmbientActive { get; private set; }
@@ -53,10 +58,31 @@ namespace FuckTheseFX.Source.Occlusion
             Shader.SetGlobalTexture(Prefix+"OriginalOcclusion",Texture2D.whiteTexture); Shader.SetGlobalTexture(Prefix+"ScreenAO",Texture2D.whiteTexture);
         }
 
-        internal void Record(OcclusionSettings settings, int quality, bool ambientAvailable)
+        internal void Record(OcclusionSettings settings, int quality, bool ambientAvailable, bool mainCamera = false)
         {
             Active = false; LightingDebugTexture = null; LastQuality = quality;
             capture.Clear(); calculate.Clear(); actors.Clear();
+            bool bleedView = settings.View.Value == OcclusionView.ScreenSpaceContactGI || settings.View.Value == OcclusionView.ScreenSpaceContactGIHistory;
+            bool requestBleed = settings.Bleed.Enabled.Value && (settings.Bleed.Strength.Value > 0 || bleedView);
+            if (!requestBleed) { bleedFailed = false; bleedUnsupportedWarned = false; }
+            bool useBleed = requestBleed && mainCamera && (settings.View.Value == OcclusionView.Normal || bleedView) && !bleedFailed;
+            if (useBleed && !ColorBleedPipeline.Supports(camera))
+            {
+                useBleed = false;
+                if (!bleedUnsupportedWarned)
+                {
+                    bleedUnsupportedWarned = true;
+                    string reason = "path="+camera.actualRenderingPath+", HDR="+camera.allowHDR+", color space="+QualitySettings.activeColorSpace+
+                        ", API="+SystemInfo.graphicsDeviceType+", RGBAHalf="+SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat,FormatUsage.Render)+
+                        ", RGBA8="+SystemInfo.IsFormatSupported(GraphicsFormat.R8G8B8A8_UNorm,FormatUsage.Render);
+                    if (lastBleedUnsupportedReason != reason)
+                    {
+                        lastBleedUnsupportedReason = reason;
+                        Plugin.MyLog.LogWarning("Screen Space Contact GI unavailable (requires HDR deferred D3D11 and supported targets): "+reason+". Existing AO remains active.");
+                    }
+                }
+            }
+            if (!useBleed) { bleed?.Dispose(); bleed = null; }
             if(width != camera.pixelWidth || height != camera.pixelHeight || resolved == null || !resolved.IsCreated())
             {
                 ReleaseTargets(); width = camera.pixelWidth; height = camera.pixelHeight;
@@ -89,7 +115,7 @@ namespace FuckTheseFX.Source.Occlusion
             }
             else GpuAssets.Release(ref originalAlpha);
             bool useActors = settings.Actors.Value && settings.ActorStrength.Value > 0;
-            if(useActors)
+            if(useActors || useBleed)
             {
                 if(actorMask == null) actorMask = Target("Actor stencil",GraphicsFormat.R8_UNorm);
                 capture.SetRenderTarget(actorMask,BuiltinRenderTextureType.CameraTarget);
@@ -135,7 +161,7 @@ namespace FuckTheseFX.Source.Occlusion
                 Draw(calculate,1,primaryProperties);
             }
             calculate.EndSample("FTFX Primary composite");
-            if(settings.View.Value != OcclusionView.Normal)
+            if(settings.View.Value != OcclusionView.Normal && !bleedView)
             {
                 if(debug == null) debug = GpuAssets.Target("FTFX AO diagnostics",width,height,GraphicsFormat.R8G8B8A8_UNorm,true);
                 if(settings.LightingDebug)
@@ -173,7 +199,20 @@ namespace FuckTheseFX.Source.Occlusion
                 actors.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
                 actors.EndSample("FTFX Actor composite");
             }
-            else { actor?.Dispose(); actor = null; GpuAssets.Release(ref actorMask); }
+            else { actor?.Dispose(); actor = null; if (!useBleed) GpuAssets.Release(ref actorMask); }
+            if (useBleed)
+            {
+                try
+                {
+                    if (bleed == null) bleed = new ColorBleedPipeline(camera,assets);
+                    bleed.Record(settings.Bleed,primary.Depth,resolved,actorMask,settings.View.Value == OcclusionView.ScreenSpaceContactGI,settings.ColorBleedGain.Value,settings.View.Value == OcclusionView.ScreenSpaceContactGIHistory);
+                }
+                catch (Exception error)
+                {
+                    bleed?.Dispose(); bleed = null; bleedFailed = true;
+                    Plugin.MyLog.LogWarning("Screen Space Contact GI failed; existing AO remains active. Toggle Screen Space Contact GI off/on to retry. " + error);
+                }
+            }
             Active = true;
         }
         private void Resolve(CommandBuffer cb, RenderTexture input, RenderTexture output, RenderTexture depth, Vector4 size)
@@ -201,6 +240,7 @@ namespace FuckTheseFX.Source.Occlusion
                 camera.RemoveCommandBuffer(CameraEvent.AfterEverything,cleanup);
             }
             reset.Dispose(); capture.Dispose(); calculate.Dispose(); actors.Dispose(); cleanup.Dispose();
+            bleed?.Dispose(); bleed = null;
             primary?.Dispose(); actor?.Dispose(); ReleaseTargets();
             UnityEngine.Object.DestroyImmediate(composite); ResetGlobals();
         }

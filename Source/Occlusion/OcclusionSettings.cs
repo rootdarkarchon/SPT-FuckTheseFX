@@ -2,7 +2,7 @@ using BepInEx.Configuration;
 
 namespace FuckTheseFX.Source.Occlusion
 {
-    public enum OcclusionView { Normal, Depth, BeforeBlur, AfterBlur, CombinedAO = 6, SecondPassAO = 7, BentNormals = 8, BentSHDifference = 9, BentLightingDifference = 10, AmbientDirectional = 11, AmbientUpward = 12, AmbientFill = 13, AmbientInteriorTransmission = 14, AmbientShares = 15 }
+    public enum OcclusionView { Normal, Depth, BeforeBlur, AfterBlur, CombinedAO = 6, SecondPassAO = 7, BentNormals = 8, BentSHDifference = 9, BentLightingDifference = 10, AmbientDirectional = 11, AmbientUpward = 12, AmbientFill = 13, AmbientInteriorTransmission = 14, AmbientShares = 15, ScreenSpaceContactGI = 16, ScreenSpaceContactGIHistory = 17 }
 
     // Configuration owns policy; neither the GPU pipeline nor the camera owns saved preferences.
     internal sealed class OcclusionSettings
@@ -12,10 +12,13 @@ namespace FuckTheseFX.Source.Occlusion
         internal ConfigEntry<int> Slices, Steps, Denoise, Quality;
         internal ConfigEntry<float> AmbientStrength, Foliage, ActorRadius, ActorStrength, ActorResponse, ActorCutoff, DepthRange, DepthStart, BentDifferenceGain, AmbientContributionGain;
         internal ConfigEntry<OcclusionView> View;
+        internal ConfigEntry<float> ColorBleedGain;
+        internal readonly ColorBleedSettings Bleed;
 
         internal OcclusionSettings(ConfigFile config)
         {
-            Enabled = config.Bind("XeGTAO", "Enabled", true, "Replace Tarkov's AO with XeGTAO. Off restores native AO. Quality is selected below; game AO Off disables the replacement and actor pass. If AOReplacer is installed, all FuckTheseFX AO and CustomAmbient features are bypassed.");
+            Bleed = new ColorBleedSettings(config);
+            Enabled = config.Bind("XeGTAO", "Enabled", true, "Replace Tarkov's AO with XeGTAO. Off restores native AO. Quality is selected below; game AO Off disables the replacement and actor pass. If AOReplacer is installed, all FuckTheseFX AO and CustomAmbient features are bypassed. Performance: no impact or an improvement over vanilla HBAO.");
             Quality = config.Bind("XeGTAO", "Quality", 3, new ConfigDescription("Quality for primary and actor XeGTAO: 0 Low (1 slice/2 steps), 1 Medium (2/2), 2 High (3/3), 3 Ultra (9/3). Independent of Tarkov's HBAO quality. Advanced primary sample overrides still apply.", new AcceptableValueRange<int>(0,3)));
             Radius = Float("XeGTAO", "EffectRadius", 1, .01f, 5, "AO radius in metres before RadiusMultiplier.");
             RadiusMultiplier = Float("XeGTAO", "RadiusMultiplier", 1.457f, .1f, 3, "Multiplies radius in the AO calculation and depth prefilter.");
@@ -28,20 +31,21 @@ namespace FuckTheseFX.Source.Occlusion
             Sharpness = Float("XeGTAO", "DenoiseSharpness", .4f, .1f, 10, "Denoiser center-pixel weight. Higher values retain detail and noise.");
             Power = Float("XeGTAO", "FinalPower", 1.5f, .5f, 5, "Visibility power before denoising. Higher values darken AO.");
             Normals = Advanced("XeGTAO", "UseNormals", true, "Use G-buffer normals including normal maps; off reconstructs geometric normals from depth.");
-            Ambient = Advanced("CustomAmbient fix", "Enabled", true, "Make custom diffuse ambient and fill respect XeGTAO. Does not change direct lights or Ambient Highlight.");
-            BentNormals = Advanced("CustomAmbient fix", "Bent normals", false, "Use XeGTAO bent normals for directional SH ambient lighting. Requires XeGTAO and the CustomAmbient fix. Adds GPU work; leaves reflections, fill and the actor pass unchanged. Respects Strength, Foliage AO strength and the AO distance fade.");
-            AmbientStrength = Float("CustomAmbient fix", "Strength", .6f, 0, 1, "AO attenuation of custom diffuse ambient and fill. Zero restores native ambient.");
-            Foliage = Float("CustomAmbient fix", "Foliage AO strength", .65f, 0, 1, "AO strength on authored zero-alpha materials, including foliage.");
-            Actors = config.Bind("Actor second AO pass", "Enabled", true, "Additional independent full-resolution contact AO on hands, held weapons and characters. Requires XeGTAO and game AO enabled.");
-            ActorRadius = Float("Actor second AO pass", "Radius", .3f, .01f, 2, "Independent radius in metres, without the primary radius multiplier.");
-            ActorStrength = Float("Actor second AO pass", "Strength", 1.5f, 0, 4, "Actor obscurance strength. Zero bypasses the pass.");
-            ActorResponse = Float("Actor second AO pass", "Response", .6f, .25f, 2, "Power on actor obscurance; values below one emphasize faint AO.");
-            ActorCutoff = Float("Actor second AO pass", "Distance cutoff", 10, .1f, 100, "Stops extra actor AO beyond this distance, fading over the last 20%.");
-            View = Advanced("Debug", "View", OcclusionView.Normal, "Full-screen AO diagnostics. Normal restores the scene. Actor view is white when inactive. BentNormals shows world-space directions as RGB; gray when the bent-normal path is inactive.");
+            Ambient = Advanced("XeGTAO", "Custom Ambient Fix Enabled", true, "Make custom diffuse ambient and fill respect XeGTAO. Does not change direct lights or Ambient Highlight.");
+            BentNormals = Advanced("XeGTAO", "Custom Ambient Fix Bent normals", false, "Use XeGTAO bent normals for directional SH ambient lighting. Requires XeGTAO and the CustomAmbient fix. Adds GPU work; leaves reflections, fill and the actor pass unchanged. Respects Strength, Foliage AO strength and the AO distance fade.");
+            AmbientStrength = Float("XeGTAO", "Custom Ambient Fix Strength", .6f, 0, 1, "AO attenuation of custom diffuse ambient and fill. Zero restores native ambient.");
+            Foliage = Float("XeGTAO", "Custom Ambient Fix Foliage AO strength", .65f, 0, 1, "AO strength on authored zero-alpha materials, including foliage.");
+            Actors = config.Bind("XeGTAO", "Second Pass Enabled", true, "Additional independent full-resolution contact AO on hands, held weapons and characters. Requires XeGTAO and game AO enabled.");
+            ActorRadius = Float("XeGTAO", "Second Pass Radius", .3f, .01f, 2, "Independent radius in metres, without the primary radius multiplier.");
+            ActorStrength = Float("XeGTAO", "Second Pass Strength", 1.5f, 0, 4, "Actor obscurance strength. Zero bypasses the pass.");
+            ActorResponse = Float("XeGTAO", "Second Pass Response", .6f, .25f, 2, "Power on actor obscurance; values below one emphasize faint AO.");
+            ActorCutoff = Float("XeGTAO", "Second Pass Distance cutoff", 10, .1f, 100, "Stops extra actor AO beyond this distance, fading over the last 20%.");
+            View = Advanced("Debug", "View", OcclusionView.Normal, "Full-screen diagnostics. Normal restores the scene. Actor view is white when inactive. BentNormals shows world-space directions as RGB; gray when inactive. ScreenSpaceContactGI isolates the final added RGB before fog/tonemap; requires Screen Space Contact GI Enabled. Adjust Screen Space Contact GI gain for display brightness. ScreenSpaceContactGIHistory: green retained, red depth/position rejection, yellow normal rejection, cyan lighting rejection, orange fresh/offscreen history, blue invalid surface, magenta strongly limited. Requires Temporal accumulation; display gain does not apply.");
             BentDifferenceGain = Float("Debug", "Bent difference gain", 32, 1, 1000, "Amplification for BentSHDifference and BentLightingDifference. Black means zero change; brighter means larger absolute RGB change. Cyan means no CustomAmbient capture; red means bent shader disabled; magenta means missing camera inputs. Diagnostics add GPU work.");
             AmbientContributionGain = Float("Debug", "Ambient contribution gain", 1, 1, 1000, "Shared display amplification for AmbientDirectional, AmbientUpward and AmbientFill, after blend, albedo and AO. AmbientShares displays relative luminance: red directional, green upward, blue fill. AmbientInteriorTransmission displays visibility times directional blend weight; black blocks directional SH, white passes it. Shares/transmission ignore gain. Requires the CustomAmbient fix; works with bent normals on or off. Excludes reflections and direct lights.");
             DepthRange = Float("Debug", "Depth range", 5, .01f, 200, "Depth display window in metres.");
             DepthStart = Float("Debug", "Depth start", 0, 0, 200, "Depth display begins at this distance in metres.");
+            ColorBleedGain = Float("Debug", "Screen Space Contact GI gain", 16, 1, 128, "Display amplification for Debug View = ScreenSpaceContactGI. Shows only the RGB added by the Screen Space Contact GI composite after strength, limits, receiver albedo, visibility and fades, before downstream fog/tonemap. Does not change scene lighting. Black means zero; cyan unavailable; magenta mismatched input dimensions. Requires Screen Space Contact GI Enabled and XeGTAO. Adds debug-only GPU work.");
 
             if (!System.Enum.IsDefined(typeof(OcclusionView), View.Value)) View.Value = OcclusionView.Normal;
 

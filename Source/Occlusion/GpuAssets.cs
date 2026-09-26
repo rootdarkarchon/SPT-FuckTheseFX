@@ -10,7 +10,7 @@ namespace FuckTheseFX.Source.Occlusion
     {
         internal readonly AssetBundle Bundle;
         internal readonly ComputeShader Compute;
-        internal readonly Shader Composite, Ambient;
+        internal readonly Shader Composite, Ambient, ColorBleed;
         internal readonly Mesh Quad;
 
         internal GpuAssets(string pluginPath)
@@ -22,6 +22,7 @@ namespace FuckTheseFX.Source.Occlusion
                 Compute = Bundle.LoadAsset<ComputeShader>("Assets/XeGTAO/XeGTAO.compute");
                 Composite = Bundle.LoadAsset<Shader>("Assets/XeGTAO/Composite.shader");
                 Ambient = Bundle.LoadAsset<Shader>("Assets/CustomAmbient.shader");
+                ColorBleed = Bundle.LoadAsset<Shader>("Assets/XeGTAO/ColorBleed.shader");
                 if (Compute == null || Composite == null || !Composite.isSupported || Composite.passCount < 8)
                     throw new InvalidOperationException("Unsupported or mismatched XeGTAO bundle.");
                 Quad = new Mesh { name = "FTFX Occlusion Quad", hideFlags = HideFlags.HideAndDontSave };

@@ -19,7 +19,7 @@ public static partial class OcclusionValidation
    typeof(BepInEx.Paths).GetProperty("BepInExConfigPath").GetSetMethod(true).Invoke(null,new object[]{Path.GetFullPath("bepinex.cfg")});
    PlayerSettings.colorSpace=ColorSpace.Linear;
    AssetDatabase.Refresh();
-   var shaders=new[]{"Assets/XeGTAO/Composite.shader","Assets/CustomAmbient.shader"};
+   var shaders=new[]{"Assets/XeGTAO/Composite.shader","Assets/CustomAmbient.shader","Assets/XeGTAO/ColorBleed.shader"};
    foreach(var path in shaders)
    {
     var shader=AssetDatabase.LoadAssetAtPath<Shader>(path);
@@ -37,6 +37,12 @@ public static partial class OcclusionValidation
     ActorEquivalence(assets,256,144);
     ActorEquivalence(assets,259,147);
     CameraLifecycle(assets);
+    ColorBleedShaders(assets);
+    ColorBleedFilter(assets);
+    ColorBleedTemporal(assets);
+    ColorBleedTemporalCamera(assets);
+    ColorBleedCamera(assets);
+    ColorBleedGammaCamera(assets);
    }
    File.WriteAllLines("validation.txt",results);
    Debug.Log(string.Join("\n",results));
@@ -247,6 +253,14 @@ public static partial class OcclusionValidation
    Require(native1.enabled && native2.enabled,"unsupported camera did not retain native AO");
    camera.orthographic=false;camera.Render();
    Require(!native1.enabled && !native2.enabled,"supported camera did not recover");
+   EFT.CameraControl.CameraManager.Instance=manager;settings.Bleed.Enabled.Value=true;camera.Render();
+   Require(camera.GetCommandBuffers(ColorBleedPipeline.Event).Count(cb=>cb.name.StartsWith("FTFX Screen Space Contact GI ["))==1,"main manager color bleed routing");
+   manager.SetSSAO(EFT.Settings.Graphics.ESSAOMode.Off);camera.Render();
+   Require(camera.GetCommandBuffers(ColorBleedPipeline.Event).Length==0,"graphics AO Off left color bleed attached");
+   manager.SetSSAO(EFT.Settings.Graphics.ESSAOMode.HighQuality);camera.Render();
+   Require(camera.GetCommandBuffers(ColorBleedPipeline.Event).Count(cb=>cb.name.StartsWith("FTFX Screen Space Contact GI ["))==1,"color bleed did not recover with AO");
+   EFT.CameraControl.CameraManager.Instance=null;camera.Render();
+   Require(!camera.GetCommandBuffers(ColorBleedPipeline.Event).Any(cb=>cb.name.StartsWith("FTFX Screen Space Contact GI [")),"former main camera retained bleed");
   }
   Require(native1.enabled && native2.enabled && camera.GetCommandBuffers(CameraEvent.BeforeImageEffectsOpaque).Length==0,"dispose did not restore native");
   UnityEngine.Object.DestroyImmediate(native1.gameObject);UnityEngine.Object.DestroyImmediate(native2.gameObject);

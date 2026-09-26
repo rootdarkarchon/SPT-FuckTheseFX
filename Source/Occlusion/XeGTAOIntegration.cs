@@ -98,7 +98,8 @@ namespace FuckTheseFX.Source.Occlusion
                 try
                 {
                     if(binding.Effect == null) binding.Effect = new CameraOcclusion(camera,assets);
-                    binding.Effect.Record(settings,settings.Quality.Value,ambient.Ready);
+                    binding.Effect.Record(settings,settings.Quality.Value,ambient.Ready,
+                        CameraManager.Instance != null && CameraManager.Instance.Camera == camera);
                     if(binding.Manager._hbao != null) binding.Manager._hbao.enabled = false;
                     if(binding.Manager._ambientOcclusion != null) binding.Manager._ambientOcclusion.enabled = false;
                     diagnostic = binding.Effect.DebugTexture;
@@ -127,6 +128,8 @@ namespace FuckTheseFX.Source.Occlusion
         }
         internal void DrawDiagnostic()
         {
+            if (Event.current.type == EventType.Repaint && (settings.View.Value == OcclusionView.ScreenSpaceContactGI || settings.View.Value == OcclusionView.ScreenSpaceContactGIHistory))
+            { DrawColorBleedDiagnostic(); return; }
             if(Event.current.type != EventType.Repaint || !settings.Enabled.Value || settings.View.Value == OcclusionView.Normal || diagnostic == null) return;
             int old = GUI.depth; GUI.depth = 1000;
             var color = GUI.color; GUI.color = Color.white;
@@ -158,6 +161,45 @@ namespace FuckTheseFX.Source.Occlusion
                 GUI.Box(new Rect(15,15,1050,70),stage+"\n"+legend+"\nCyan: no CustomAmbient capture. Requires XeGTAO + CustomAmbient fix. Excludes reflections/direct lights. Diagnostic view adds GPU work.");
             }
             GUI.depth = old; GUI.color = color;
+        }
+        private void DrawColorBleedDiagnostic()
+        {
+            // Resolve the current MAIN camera every time. An optic rendering last must
+            // never replace this diagnostic with its AO output or a previous camera.
+            RenderTexture texture = null;
+            bool historyView = settings.View.Value == OcclusionView.ScreenSpaceContactGIHistory;
+            string status;
+            bool disabled = !settings.Bleed.Enabled.Value || (historyView && !settings.Bleed.Temporal.Value);
+            if (disabled) status = historyView ? "History unavailable: enable Screen Space Contact GI and Temporal accumulation." : "Screen Space Contact GI disabled: zero contribution.";
+            else if (!settings.Enabled.Value) status = "Unavailable: XeGTAO is disabled.";
+            else
+            {
+                status = "Unavailable: no active main-camera capture (unsupported camera, resize or pass failure).";
+                var main = CameraManager.Instance != null ? CameraManager.Instance.Camera : null;
+                foreach (var binding in bindings.Values)
+                {
+                    if (main == null || binding.Camera != main) continue;
+                    if (binding.Mode == ESSAOMode.Off) status = "Unavailable: game AO is Off.";
+                    else if (binding.Effect != null && binding.Effect.Active)
+                    {
+                        texture = historyView ? binding.Effect.ColorBleedHistoryTexture : binding.Effect.ColorBleedDebugTexture;
+                        if (texture != null)
+                            status = historyView ? "Green: retained. Red: depth/position. Yellow: normal. Cyan: lighting. Orange: fresh/offscreen. Blue: invalid. Magenta: limited." : "Black: zero added light. RGB: added color. Magenta: mismatched inputs. Higher display gain can clip highlights.";
+                    }
+                    break;
+                }
+            }
+            int oldDepth = GUI.depth; var oldColor = GUI.color;
+            try
+            {
+                GUI.depth = 1000;
+                GUI.color = texture != null ? Color.white : disabled ? Color.black : Color.cyan;
+                GUI.DrawTexture(new Rect(0,0,Screen.width,Screen.height),texture != null ? (Texture)texture : Texture2D.whiteTexture,ScaleMode.StretchToFill,false);
+                GUI.color = Color.white;
+                GUI.Box(new Rect(15,15,1100,75),(historyView ? "Screen Space Contact GI history | configured maximum "+settings.Bleed.HistoryFrames.Value+" frames" : "Screen Space Contact GI addition | display gain "+settings.ColorBleedGain.Value.ToString("0.#")+"x")+"\n"+status+
+                    (historyView ? "\nShows actual retention and limiting this render. Display gain does not apply. Select Normal before benchmarking." : "\nAfter strength, limits, albedo, visibility and fades; before fog/tonemap. Gain changes only this display. Select Normal before benchmarking."));
+            }
+            finally { GUI.depth = oldDepth; GUI.color = oldColor; }
         }
         public void Dispose()
         {

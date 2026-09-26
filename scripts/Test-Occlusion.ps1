@@ -15,8 +15,11 @@ foreach ($library in @('BepInEx.dll','0Harmony.dll','Mono.Cecil.dll','Mono.Cecil
 Set-Content (Join-Path $project 'Packages\manifest.json') '{"dependencies":{"com.unity.modules.assetbundle":"1.0.0","com.unity.modules.imgui":"1.0.0","com.unity.modules.imageconversion":"1.0.0","com.unity.modules.physics":"1.0.0"}}'
 Set-Content (Join-Path $project 'ProjectSettings\ProjectVersion.txt') 'm_EditorVersion: 2022.3.43f1'
 $log = Join-Path $project 'validation.log'
+$started = [DateTime]::UtcNow
 $p = Start-Process $UnityEditorPath -ArgumentList @('-batchmode','-quit','-force-d3d11','-projectPath',('"'+$project+'"'),'-executeMethod','OcclusionValidation.Run','-logFile',('"'+$log+'"')) -WindowStyle Hidden -PassThru
 $p.WaitForExit()
-if ($p.ExitCode -ne 0) { throw "Occlusion validation failed: $log" }
+if ($p.ExitCode -ne 0) { throw "Occlusion validation failed (exit $($p.ExitCode)): $log. Check the log timestamp before interpreting it." }
+$result = Join-Path $project 'validation.txt'
+if (-not (Test-Path $result) -or (Get-Item $result).LastWriteTimeUtc -lt $started) { throw 'Unity did not produce a fresh validation result.' }
 Copy-Item (Join-Path $project 'Output\Assets\occlusion') (Join-Path $repo 'Assets\occlusion') -Force
 Get-Content (Join-Path $project 'validation.txt')

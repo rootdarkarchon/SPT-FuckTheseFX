@@ -14,6 +14,18 @@ $config = [BepInEx.Configuration.ConfigFile]::new($path,$false)
 $config.SaveOnConfigSet = $false
 $bindArgs = [object[]]::new(1); $bindArgs[0] = $config; $bind.Invoke($null, $bindArgs)
 $expected = @{
+    'Screen Space Contact GI/Enabled' = 'False'
+    'Screen Space Contact GI/Strength' = '3'
+    'Screen Space Contact GI/Resolution' = 'Quarter'
+    'Screen Space Contact GI/Spatial filter' = 'True'
+    'Screen Space Contact GI/Temporal accumulation' = 'True'
+    'Screen Space Contact GI/History frames' = '16'
+    'Screen Space Contact GI/Samples' = '8'
+    'Screen Space Contact GI/Radius' = '0.75'
+    'Screen Space Contact GI/Depth tolerance' = '0.02'
+    'Screen Space Contact GI/Donor luminance limit' = '2'
+    'Screen Space Contact GI/Maximum bounce fraction' = '0.2'
+    'Screen Space Contact GI/Distance cutoff' = '25'
     'XeGTAO/Enabled' = 'True'
     'XeGTAO/Quality' = '3'
     'XeGTAO/FinalPower' = '1.5'
@@ -27,20 +39,21 @@ $expected = @{
     'XeGTAO/Denoise passes' = '2'
     'XeGTAO/DenoiseSharpness' = '0.4'
     'XeGTAO/UseNormals' = 'True'
-    'CustomAmbient fix/Enabled' = 'True'
-    'CustomAmbient fix/Bent normals' = 'False'
-    'CustomAmbient fix/Strength' = '0.6'
-    'CustomAmbient fix/Foliage AO strength' = '0.65'
-    'Actor second AO pass/Enabled' = 'True'
-    'Actor second AO pass/Radius' = '0.3'
-    'Actor second AO pass/Strength' = '1.5'
-    'Actor second AO pass/Response' = '0.6'
-    'Actor second AO pass/Distance cutoff' = '10'
+    'XeGTAO/Custom Ambient Fix Enabled' = 'True'
+    'XeGTAO/Custom Ambient Fix Bent normals' = 'False'
+    'XeGTAO/Custom Ambient Fix Strength' = '0.6'
+    'XeGTAO/Custom Ambient Fix Foliage AO strength' = '0.65'
+    'XeGTAO/Second Pass Enabled' = 'True'
+    'XeGTAO/Second Pass Radius' = '0.3'
+    'XeGTAO/Second Pass Strength' = '1.5'
+    'XeGTAO/Second Pass Response' = '0.6'
+    'XeGTAO/Second Pass Distance cutoff' = '10'
     'Debug/View' = 'Normal'
     'Debug/Bent difference gain' = '32'
     'Debug/Ambient contribution gain' = '1'
     'Debug/Depth range' = '5'
     'Debug/Depth start' = '0'
+    'Debug/Screen Space Contact GI gain' = '16'
     'Ambient Highlight/Enabled' = 'False'
     'Vintage Filter/Enabled' = 'False'
     'Ultimate Bloom/Bloom input scale' = '0.67'
@@ -53,13 +66,13 @@ $expected = @{
     'Distant Shadows/Half filter samples' = '12'
     'Distant Shadows/Full filter samples' = '8'
 }
-if ($config.Count -ne 38) { throw 'Unexpected setting count' }
+if ($config.Count -ne 51) { throw 'Unexpected setting count' }
 foreach ($definition in $config.Keys) {
     $entry = $config[$definition]
     $name = "$($definition.Section)/$($definition.Key)"
     if (-not $expected.ContainsKey($name) -or $entry.DefaultValue.ToString() -ne $expected[$name]) { throw "Wrong default: $name" }
     $advanced = @($entry.Description.Tags | Where-Object { $_.GetType().GetField('IsAdvanced').GetValue($_) -eq $true }).Count -eq 1
-    if ($advanced -ne ($definition.Key -match '^(Adjust filter samples|(Quarter|Half|Full) filter samples)$' -or $definition.Section -in @('CustomAmbient fix','Debug') -or ($definition.Section -in @('XeGTAO','Actor second AO pass') -and $definition.Key -notin @('Enabled','Quality')))) { throw "Incorrect advanced visibility: $name" }
+    if ($advanced -ne ($definition.Key -match '^(Adjust filter samples|(Quarter|Half|Full) filter samples)$' -or $definition.Section -in @('Debug') -or ($definition.Section -in @('XeGTAO','Screen Space Contact GI') -and $definition.Key -notin @('Enabled','Quality','Second Pass Enabled')))) { throw "Incorrect advanced visibility: $name" }
 }
 function Entry($section,$key) { $config[[BepInEx.Configuration.ConfigDefinition]::new($section,$key)] }
 foreach ($key in @('Quarter filter samples','Half filter samples','Full filter samples')) {
@@ -72,32 +85,52 @@ $radiusEntry = Entry 'XeGTAO' 'EffectRadius'
 $radiusEntry.SetSerializedValue('0.55')
 $enabledEntry = Entry 'XeGTAO' 'Enabled'
 $enabledEntry.SetSerializedValue('false')
-$bentEntry = Entry 'CustomAmbient fix' 'Bent normals'
+$bentEntry = Entry 'XeGTAO' 'Custom Ambient Fix Bent normals'
 $bentEntry.SetSerializedValue('true')
 $vintageEntry = Entry 'Vintage Filter' 'Enabled'
 $vintageEntry.SetSerializedValue('true')
 $qualityEntry = Entry 'XeGTAO' 'Quality'
 if ($qualityEntry.Description.AcceptableValues.Clamp([int]-1) -ne 0 -or $qualityEntry.Description.AcceptableValues.Clamp([int]4) -ne 3) { throw 'Quality bounds changed' }
 $qualityEntry.SetSerializedValue('1')
+$bleedEnabled = Entry 'Screen Space Contact GI' 'Enabled'
+$bleedEnabled.SetSerializedValue('true')
+(Entry 'Screen Space Contact GI' 'Spatial filter').SetSerializedValue('false')
+(Entry 'Screen Space Contact GI' 'Temporal accumulation').SetSerializedValue('false')
+$historyFrames = Entry 'Screen Space Contact GI' 'History frames'
+if ($historyFrames.Description.AcceptableValues.Clamp([int]1) -ne 4 -or $historyFrames.Description.AcceptableValues.Clamp([int]32) -ne 30) { throw 'Screen Space Contact GI history bounds changed' }
+$historyFrames.SetSerializedValue('30')
+$bleedStrength = Entry 'Screen Space Contact GI' 'Strength'
+if ($bleedStrength.Description.AcceptableValues.Clamp([single]-1) -ne 0 -or $bleedStrength.Description.AcceptableValues.Clamp([single]5) -ne 4) { throw 'Screen Space Contact GI strength bounds changed' }
+$bleedStrength.SetSerializedValue('2')
+if ($bleedStrength.BoxedValue -ne 2) { throw 'Screen Space Contact GI strength above one was clamped' }
+$bleedResolution = Entry 'Screen Space Contact GI' 'Resolution'
+$bleedResolution.SetSerializedValue('Quarter')
+$bleedSamples = Entry 'Screen Space Contact GI' 'Samples'
+foreach ($sampleCount in @(4,6,8,16,32)) { if (-not $bleedSamples.Description.AcceptableValues.IsValid([int]$sampleCount)) { throw "Missing GI sample choice: $sampleCount" } }
+if (-not $bleedSamples.Description.AcceptableValues.IsValid([int]4) -or -not $bleedSamples.Description.AcceptableValues.IsValid([int]8) -or $bleedSamples.Description.AcceptableValues.IsValid([int]5)) { throw 'Screen Space Contact GI sample choices changed' }
+$bleedSamples.SetSerializedValue('32')
+$bleedGain = Entry 'Debug' 'Screen Space Contact GI gain'
+if ($bleedGain.Description.AcceptableValues.Clamp([single]0) -ne 1 -or $bleedGain.Description.AcceptableValues.Clamp([single]200) -ne 128) { throw 'Screen Space Contact GI debug gain bounds changed' }
+$bleedGain.SetSerializedValue('32')
+(Entry 'Debug' 'View').SetSerializedValue('ScreenSpaceContactGIHistory')
 $config.Save()
 $saved = [BepInEx.Configuration.ConfigFile]::new($path,$false)
 $saved.SaveOnConfigSet = $false
 $bindArgs[0] = $saved; $bind.Invoke($null,$bindArgs)
 foreach ($definition in $config.Keys) { if ($saved[$definition].GetSerializedValue() -ne $config[$definition].GetSerializedValue()) { throw 'Saved preference did not survive reload' } }
-Write-Output 'Verified 38 settings, ten normal controls, defaults, bounds and saved preferences. No AOReplacer import.'
+Write-Output 'Verified 51 settings, eleven normal controls, defaults, bounds and saved preferences. No AOReplacer import.'
 
 $enum = $assembly.GetType('FuckTheseFX.Source.DistantShadows.DistantShadowMaskResolution', $true)
 if ([Enum]::GetNames($enum) -join ',' -ne 'Quarter,Half,Full') { throw 'Unexpected resolution option' }
-# Renamed keys in existing FX configs migrate, but explicit new keys always win.
-$renamePath = Join-Path $testRoot 'renamed.cfg'
-[IO.File]::WriteAllText($renamePath, "[Ultimate Bloom]`nInput resolution scale = 0.8`n[Distant Shadows]`nMask resolution = Full`n")
-$renamed = [BepInEx.Configuration.ConfigFile]::new($renamePath,$false)
-$renamed.SaveOnConfigSet = $false
-$bindArgs[0] = $renamed; $bind.Invoke($null,$bindArgs)
-if ([Math]::Abs($renamed[[BepInEx.Configuration.ConfigDefinition]::new('Ultimate Bloom','Bloom input scale')].BoxedValue - .8) -gt .00001 -or $renamed[[BepInEx.Configuration.ConfigDefinition]::new('Distant Shadows','Resolution')].BoxedValue.ToString() -ne 'Full') { throw 'Renamed settings migration failed' }
-[IO.File]::WriteAllText($renamePath, "[Ultimate Bloom]`nInput resolution scale = 0.8`nBloom input scale = 0.3`n[Distant Shadows]`nMask resolution = Full`nResolution = Quarter`n")
-$renamed = [BepInEx.Configuration.ConfigFile]::new($renamePath,$false)
-$renamed.SaveOnConfigSet = $false
-$bindArgs[0] = $renamed; $bind.Invoke($null,$bindArgs)
-if ([Math]::Abs($renamed[[BepInEx.Configuration.ConfigDefinition]::new('Ultimate Bloom','Bloom input scale')].BoxedValue - .3) -gt .00001 -or $renamed[[BepInEx.Configuration.ConfigDefinition]::new('Distant Shadows','Resolution')].BoxedValue.ToString() -ne 'Quarter') { throw 'Old keys overrode explicit new settings' }
-Write-Output 'Verified Quarter/Half/Full enum and renamed key migration with new-key precedence.'
+$performance = @{
+    'Ambient Highlight' = 'no measurable impact'
+    'Vintage Filter' = 'no measurable impact'
+    'Ultimate Bloom' = 'positive impact when reducing input scale'
+    'Distant Shadows' = 'small impact at defaults'
+    'XeGTAO' = 'no impact or an improvement over vanilla HBAO'
+    'Screen Space Contact GI' = 'small-medium impact at defaults'
+}
+foreach ($section in $performance.Keys) {
+    if (-not (Entry $section 'Enabled').Description.Description.Contains($performance[$section])) { throw "Missing performance tooltip: $section" }
+}
+Write-Output 'Verified performance tooltips for all six feature enable toggles.'

@@ -7,6 +7,7 @@ namespace EFT.CameraControl
  public sealed class NativeAOFixture : MonoBehaviour { }
  public sealed class CameraManager
  {
+  public static CameraManager Instance;
   public Camera Camera;
   public Light _hbao, _ambientOcclusion;
   [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
