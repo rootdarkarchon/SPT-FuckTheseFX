@@ -17,6 +17,7 @@ Shader "Hidden/FuckTheseFX/Occlusion"
   Texture2D<float2> _PrimaryAO;
   Texture2D<float4> _Emission;
   float4 _Size; // width, height, far / 65504, visibility scale
+  float4 _AOFade; // start depth, reciprocal fade range, final intensity, final power
   float4 _ActorSettings; // strength, response, cutoff, unused
   float4 _Debug; // view, start, range, unused
   struct Varyings { float4 position:SV_POSITION; float2 uv:TEXCOORD0; };
@@ -38,8 +39,8 @@ Shader "Hidden/FuckTheseFX/Occlusion"
   }
   float Primary(float2 ao)
   {
-   float fade=saturate((ao.y*_Size.z-35)/65);
-   return saturate(1+(pow(max(ao.x,0),lerp(.8,1,fade))-1)*lerp(2,0,fade));
+   float fade=saturate((ao.y*_Size.z-_AOFade.x)*_AOFade.y);
+   return saturate(1+(pow(max(ao.x,0),lerp(.8,_AOFade.w,fade))-1)*lerp(2,_AOFade.z,fade));
   }
   struct Outputs { float4 albedo:SV_Target0; float4 emission:SV_Target1; };
   Outputs Deferred(Varyings i)
@@ -84,6 +85,29 @@ Shader "Hidden/FuckTheseFX/Occlusion"
   }
   Texture2D<float4> _FTFXMaterialInput;
   float4 MaterialAlpha(Varyings i):SV_Target { return _FTFXMaterialInput.Load(int3(Pixel(i),0)).aaaa; }
+  Texture2D<float> _LiveAlpha;
+  Texture2D<float4> _LiveA, _LiveB;
+  float4 _LiveSettings; // extra strength, divider (-1 full frame), far plane, unused
+  float4 _LiveDisplay; // gain, absolute difference, mask, unused
+  bool LiveEligible(int2 p)
+  {
+   float depth=_PrimaryAO.Load(int3(p,0)).y*_Size.z;
+   return _LiveAlpha.Load(int3(p,0)) < .5/255.0 && _ActorMask.Load(int3(p,0)) < .5 && depth>0 && depth<_LiveSettings.z*.999;
+  }
+  float4 LiveComposite(Varyings i):SV_Target
+  {
+   int2 p=Pixel(i);
+   float v=LiveEligible(p) && i.uv.x>=_LiveSettings.y ? lerp(1,Primary(_PrimaryAO.Load(int3(p,0))),saturate(_LiveSettings.x)) : 1;
+   return float4(v,v,v,1);
+  }
+  float4 LiveDisplay(Varyings i):SV_Target
+  {
+   int2 p=Pixel(i);
+   if(_LiveDisplay.z>.5) return float4(LiveEligible(p)?float3(1,1,1):float3(0,0,0),1);
+   float3 a=_LiveA.Load(int3(p,0)).rgb;
+   float3 b=_LiveB.Load(int3(p,0)).rgb;
+   return float4((_LiveDisplay.y>.5?abs(a-b):a)*_LiveDisplay.x,1);
+  }
   ENDHLSL
   Pass // 0
   {
@@ -158,6 +182,24 @@ Shader "Hidden/FuckTheseFX/Occlusion"
    HLSLPROGRAM
    #pragma vertex Vert
    #pragma fragment MaterialAlpha
+   ENDHLSL
+  }
+  Pass // 8
+  {
+   Name "FoliageLiveComposite"
+   Blend DstColor Zero
+   ColorMask RGB
+   HLSLPROGRAM
+   #pragma vertex Vert
+   #pragma fragment LiveComposite
+   ENDHLSL
+  }
+  Pass // 9
+  {
+   Name "FoliageLiveDisplay"
+   HLSLPROGRAM
+   #pragma vertex Vert
+   #pragma fragment LiveDisplay
    ENDHLSL
   }
  }

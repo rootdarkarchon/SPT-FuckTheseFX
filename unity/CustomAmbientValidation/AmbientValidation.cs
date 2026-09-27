@@ -19,6 +19,7 @@ public static partial class AmbientValidation
  static readonly List<UnityEngine.Object> owned = new List<UnityEngine.Object>();
  static Texture2D albedo;
  static RenderTexture diagnosticTarget;
+ static RenderTexture captureUnoccluded, captureRemoved;
  static void Check(bool ok, string description) { if(!ok) throw new Exception(description); checks++; Debug.Log("PASS "+description); }
  static Texture2D Texture(Color color) {
   var t=new Texture2D(1,1,TextureFormat.RGBAFloat,false,true); t.SetPixel(0,0,color);t.Apply();owned.Add(t);return t;
@@ -59,6 +60,7 @@ public static partial class AmbientValidation
    cb.SetRenderTarget(camera.targetTexture);
    cb.ClearRenderTarget(false,true,initialLighting);
    if(diagnosticTarget != null) { cb.SetGlobalFloat("_FTFX_CA_DebugAvailable",1); cb.SetRandomWriteTarget(1,diagnosticTarget); }
+   if(captureUnoccluded != null) { cb.SetRandomWriteTarget(2,captureUnoccluded);cb.SetRandomWriteTarget(3,captureRemoved); }
    cb.DrawMesh(quad,Matrix4x4.identity,mat,0,drawPass,properties);
    if(diagnosticTarget != null) { cb.ClearRandomWriteTargets(); cb.SetGlobalFloat("_FTFX_CA_DebugAvailable",0); }
    camera.AddCommandBuffer(CameraEvent.AfterEverything,cb);
@@ -88,6 +90,16 @@ public static partial class AmbientValidation
     properties.SetTexture("_FTFX_CA_ScreenAO",Texture(new Color(ao,2,0,0)));
     float visibility=Mathf.Lerp(1,ao,foliage);
     Check(Error(ScaleAmbient(baseline,hdr,visibility),Draw(fixedAmbient,hdr,1))<.00015,"Foliage preserves variable screen AO HDR="+hdr+" AO="+ao+" strength="+foliage);
+   }
+   properties.SetFloat("_FTFX_CA_FoliageStrength",1);
+   properties.SetVector("_FTFX_CA_AODecode",new Vector4(2,.8f,1,0));
+   foreach(var range in new[]{new Vector2(35,100),new Vector2(60,150),new Vector2(0,1),new Vector2(60,61)})
+   foreach(float depth in new[]{0,range.x,(range.x+range.y)*.5f,range.y,range.y+10}) {
+    properties.SetVector("_FTFX_CA_AOFade",new Vector4(range.x,1/(range.y-range.x),0,1));
+    properties.SetTexture("_FTFX_CA_ScreenAO",Texture(new Color(.8f,depth,0,0)));
+    float fade=Mathf.Clamp01((depth-range.x)/(range.y-range.x));
+    float visibility=Mathf.Clamp01(1+(Mathf.Pow(.8f,Mathf.Lerp(.8f,1,fade))-1)*Mathf.Lerp(2,0,fade));
+    Check(Error(ScaleAmbient(baseline,hdr,visibility),Draw(fixedAmbient,hdr,1))<.00015,"Foliage follows shared distance fade HDR="+hdr+" range="+range+" depth="+depth);
    }
    properties.SetTexture("_FTFX_CA_OriginalOcclusion",Texture2D.whiteTexture);
    properties.SetTexture("_FTFX_CA_ScreenAO",Texture2D.whiteTexture);
@@ -166,6 +178,7 @@ public static partial class AmbientValidation
    CheckFoliage();
    CheckLightingBlend();
    CheckBentNormals();
+   CheckFoliageCapture();
    File.WriteAllText("validation.txt","PASSED "+checks+" D3D11 shader checks. Worst strength-zero native parity error: "+worst+"\nGPU: "+SystemInfo.graphicsDeviceName);
    Debug.Log(File.ReadAllText("validation.txt"));
    UnityEngine.Object.DestroyImmediate(camera.gameObject);UnityEngine.Object.DestroyImmediate(quad);

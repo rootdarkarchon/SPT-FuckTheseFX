@@ -12,6 +12,7 @@ namespace FuckTheseFX.Source.Occlusion
         private readonly Material composite;
         private OcclusionPipeline primary, actor;
         private ColorBleedPipeline bleed;
+        private FoliageOcclusion foliageAO;
         private bool bleedFailed, bleedUnsupportedWarned;
         private static string lastBleedUnsupportedReason;
         private RenderTexture resolved, originalAlpha, actorMask, debug, rawDebug;
@@ -23,6 +24,8 @@ namespace FuckTheseFX.Source.Occlusion
         internal RenderTexture ColorBleedDebugTexture => bleed?.DebugTexture;
         internal RenderTexture ColorBleedHistoryTexture => bleed?.HistoryDiagnosticTexture;
         internal RenderTexture LightingDebugTexture { get; private set; }
+        internal FoliageDiagnostics Foliage { get; private set; }
+        internal FoliageLive Live { get; private set; }
         internal bool Active { get; private set; }
         internal bool AmbientActive { get; private set; }
         internal const string Prefix = "_FTFX_CA_";
@@ -63,9 +66,12 @@ namespace FuckTheseFX.Source.Occlusion
             Active = false; LightingDebugTexture = null; LastQuality = quality;
             capture.Clear(); calculate.Clear(); actors.Clear();
             bool bleedView = settings.View.Value == OcclusionView.ScreenSpaceContactGI || settings.View.Value == OcclusionView.ScreenSpaceContactGIHistory;
+            bool useLive = settings.FoliageLive && mainCamera && camera.allowHDR && ambientAvailable && settings.Ambient.Value && settings.AmbientStrength.Value > 0;
+            bool useFoliage = mainCamera && camera.allowHDR && settings.FoliageExtraAO.Value > 0 &&
+                (settings.View.Value == OcclusionView.Normal || settings.FoliageCapture || useLive);
             bool requestBleed = settings.Bleed.Enabled.Value && (settings.Bleed.Strength.Value > 0 || bleedView);
             if (!requestBleed) { bleedFailed = false; bleedUnsupportedWarned = false; }
-            bool useBleed = requestBleed && mainCamera && (settings.View.Value == OcclusionView.Normal || bleedView) && !bleedFailed;
+            bool useBleed = requestBleed && mainCamera && (settings.View.Value == OcclusionView.Normal || bleedView || settings.FoliageCapture || settings.FoliageLive) && !bleedFailed && !(useLive && settings.FoliageBypassGI.Value);
             if (useBleed && !ColorBleedPipeline.Supports(camera))
             {
                 useBleed = false;
@@ -96,15 +102,29 @@ namespace FuckTheseFX.Source.Occlusion
             }
             var size = new Vector4(width,height,camera.farClipPlane/65504f,settings.Denoise.Value == 0 ? 1.5f : 1);
             composite.SetVector("_Size",size);
+            var distanceFade = settings.DistanceFade;
+            composite.SetVector("_AOFade",distanceFade);
             composite.SetVector("_ActorSettings",new Vector4(settings.ActorStrength.Value,settings.ActorResponse.Value,settings.ActorCutoff.Value,0));
             composite.SetVector("_Debug",new Vector4((int)settings.View.Value,settings.DepthStart.Value,settings.DepthRange.Value,0));
             AmbientActive = ambientAvailable && settings.Ambient.Value && settings.AmbientStrength.Value > 0;
             bool bent = AmbientActive && settings.BentNormals.Value;
+            if(useLive)
+            {
+                if(Live == null) Live = new FoliageLive(camera,assets,width,height);
+                Live.BeginFrame(calculate);
+            }
+            else { Live?.Dispose(); Live = null; }
             composite.SetFloat("_BentNormals",bent ? 1 : 0);
             // Invert LoadNormal's XeGTAO Y/Z reflection before rotating to world space.
             var bentToWorld = camera.cameraToWorldMatrix * Matrix4x4.Scale(new Vector3(1,-1,-1));
             composite.SetMatrix("_BentToWorld",bentToWorld);
-            if(AmbientActive)
+            if(settings.FoliageCapture && mainCamera)
+            {
+                if(Foliage == null) Foliage = new FoliageDiagnostics(camera,width,height);
+                Foliage.BeginFrame(calculate,settings);
+            }
+            else { Foliage?.Dispose(); Foliage = null; }
+            if(AmbientActive || useFoliage)
             {
                 if(originalAlpha == null) originalAlpha = Target("Original material AO",GraphicsFormat.R8_UNorm);
                 capture.SetGlobalTexture("_FTFXMaterialInput",BuiltinRenderTextureType.GBuffer0);
@@ -115,7 +135,7 @@ namespace FuckTheseFX.Source.Occlusion
             }
             else GpuAssets.Release(ref originalAlpha);
             bool useActors = settings.Actors.Value && settings.ActorStrength.Value > 0;
-            if(useActors || useBleed)
+            if(useActors || useBleed || useLive || useFoliage)
             {
                 if(actorMask == null) actorMask = Target("Actor stencil",GraphicsFormat.R8_UNorm);
                 capture.SetRenderTarget(actorMask,BuiltinRenderTextureType.CameraTarget);
@@ -132,7 +152,7 @@ namespace FuckTheseFX.Source.Occlusion
             {
                 calculate.SetGlobalTexture(Prefix+"ScreenAO",resolved);
                 calculate.SetGlobalVector(Prefix+"AODecode",new Vector4(2,.8f,size.z,0));
-                calculate.SetGlobalVector(Prefix+"AOFade",new Vector4(35,1f/65,0,1));
+                calculate.SetGlobalVector(Prefix+"AOFade",distanceFade);
                 calculate.SetGlobalFloat(Prefix+"SeparateAOAvailable",1);
                 if(bent)
                 {
@@ -161,7 +181,12 @@ namespace FuckTheseFX.Source.Occlusion
                 Draw(calculate,1,primaryProperties);
             }
             calculate.EndSample("FTFX Primary composite");
-            if(settings.View.Value != OcclusionView.Normal && !bleedView)
+            if(settings.FoliageCapture)
+            {
+                GpuAssets.Release(ref debug); GpuAssets.Release(ref rawDebug);
+                LightingDebugTexture = Foliage?.AO;
+            }
+            else if(settings.View.Value != OcclusionView.Normal && !bleedView && !settings.FoliageLive)
             {
                 if(debug == null) debug = GpuAssets.Target("FTFX AO diagnostics",width,height,GraphicsFormat.R8G8B8A8_UNorm,true);
                 if(settings.LightingDebug)
@@ -199,7 +224,7 @@ namespace FuckTheseFX.Source.Occlusion
                 actors.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
                 actors.EndSample("FTFX Actor composite");
             }
-            else { actor?.Dispose(); actor = null; if (!useBleed) GpuAssets.Release(ref actorMask); }
+            else { actor?.Dispose(); actor = null; if (!useBleed && !useLive && !useFoliage) GpuAssets.Release(ref actorMask); }
             if (useBleed)
             {
                 try
@@ -213,6 +238,15 @@ namespace FuckTheseFX.Source.Occlusion
                     Plugin.MyLog.LogWarning("Screen Space Contact GI failed; existing AO remains active. Toggle Screen Space Contact GI off/on to retry. " + error);
                 }
             }
+            Foliage?.RecordStages();
+            if(useFoliage)
+            {
+                if(foliageAO == null) foliageAO = new FoliageOcclusion(camera,assets);
+                foliageAO.Record(settings,resolved,originalAlpha,actorMask);
+            }
+            else { foliageAO?.Dispose(); foliageAO = null; }
+            // The live BeforeOpaque snapshot must include the surface AO that feeds native fog.
+            Live?.Record(settings,resolved,originalAlpha,actorMask);
             Active = true;
         }
         private void Resolve(CommandBuffer cb, RenderTexture input, RenderTexture output, RenderTexture depth, Vector4 size)
@@ -227,6 +261,9 @@ namespace FuckTheseFX.Source.Occlusion
             ? CameraEvent.BeforeReflections : CameraEvent.BeforeLighting;
         private void ReleaseTargets()
         {
+            Foliage?.Dispose(); Foliage = null;
+            Live?.Dispose(); Live = null;
+            foliageAO?.Dispose(); foliageAO = null;
             GpuAssets.Release(ref resolved); GpuAssets.Release(ref originalAlpha); GpuAssets.Release(ref actorMask);
             GpuAssets.Release(ref debug); GpuAssets.Release(ref rawDebug);
         }

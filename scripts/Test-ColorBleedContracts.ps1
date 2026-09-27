@@ -25,9 +25,11 @@ try {
         }
     }
     if ($events['m_LegacyCmdBufferOpaque'] -ne 12 -or $events['m_LegacyCmdBuffer'] -ne 18) { throw 'Post-processing attachment points changed.' }
+    $build = $layer.Methods | Where-Object Name -eq 'BuildCommandBuffers'
+    if (-not ($build.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.DeclaringType.FullName -eq 'UnityEngine.Rendering.PostProcessing.Fog' -and $_.Operand.Name -eq 'Render' })) { throw 'Native opaque fog render contract changed.' }
     $builtins = $layer.Methods | Where-Object Name -eq 'RenderBuiltins'
     foreach ($effect in @('AutoExposure','Bloom','ColorGrading')) {
         if (-not ($builtins.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.FullName -match "RenderEffect<UnityEngine.Rendering.PostProcessing.$effect>" })) { throw "Missing downstream $effect contract." }
     }
-    Write-Output 'Verified installed CustomAmbient AfterLighting, opaque processing event 12, later event 18 and exposure/bloom/color-grading contracts.'
+    Write-Output 'Verified installed CustomAmbient AfterLighting, opaque processing event 12, native fog render, later event 18 and exposure/bloom/color-grading contracts.'
 } finally { $game.Dispose(); $post.Dispose() }

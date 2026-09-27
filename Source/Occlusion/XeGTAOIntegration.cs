@@ -38,6 +38,9 @@ namespace FuckTheseFX.Source.Occlusion
         private float resumeAt;
         private int cleanupFrames;
         private RenderTexture diagnostic;
+        private float captureStarted;
+        private string captureStatus;
+        private bool wasFoliageLive;
 
         internal XeGTAOIntegration(string path, OcclusionSettings settings) { pluginPath = path; this.settings = settings; }
         internal void Initialize()
@@ -45,7 +48,8 @@ namespace FuckTheseFX.Source.Occlusion
             try
             {
                 assets = new GpuAssets(pluginPath);
-                ambient = new AmbientOcclusionBridge(assets.Ambient,settings,EligibleAmbient,LightingDebugTarget);
+                settings.ResetFoliageExperiment();
+                ambient = new AmbientOcclusionBridge(assets.Ambient,settings,EligibleAmbient,LightingDebugTarget,FoliageTarget,LiveTarget);
                 ambient.Initialize();
                 var target = AccessTools.DeclaredMethod(typeof(CameraManager),nameof(CameraManager.SetSSAO),new[] {typeof(ESSAOMode)});
                 if(target == null || target.ReturnType != typeof(void)) throw new MissingMethodException("CameraManager.SetSSAO");
@@ -79,11 +83,23 @@ namespace FuckTheseFX.Source.Occlusion
                 if(binding.Camera == camera && binding.Effect != null && binding.Effect.Active) return binding.Effect.LightingDebugTexture;
             return null;
         }
+        private FoliageDiagnostics FoliageTarget(Camera camera)
+        {
+            foreach(var binding in bindings.Values)
+                if(binding.Camera == camera && binding.Effect != null && binding.Effect.Active) return binding.Effect.Foliage;
+            return null;
+        }
         private bool EligibleAmbient(Camera camera)
         {
             foreach(var binding in bindings.Values)
                 if(binding.Camera == camera && binding.Effect != null && binding.Effect.Active && binding.Effect.AmbientActive) return true;
             return false;
+        }
+        private FoliageLive LiveTarget(Camera camera)
+        {
+            foreach(var binding in bindings.Values)
+                if(binding.Camera == camera && binding.Effect != null && binding.Effect.Active) return binding.Effect.Live;
+            return null;
         }
         private void BeforeCamera(Camera camera)
         {
@@ -114,6 +130,9 @@ namespace FuckTheseFX.Source.Occlusion
         internal void Update()
         {
             if(instance != this) return;
+            if(wasFoliageLive && !settings.FoliageLive) settings.ResetFoliageExperiment();
+            wasFoliageLive = settings.FoliageLive;
+            UpdateFoliageCapture();
             if(previousEnabled != settings.Enabled.Value)
             {
                 previousEnabled = settings.Enabled.Value;
@@ -128,6 +147,13 @@ namespace FuckTheseFX.Source.Occlusion
         }
         internal void DrawDiagnostic()
         {
+            if(settings.FoliageLive) { DrawFoliageLive(); return; }
+            if(settings.FoliageCapture)
+            {
+                if(Event.current.type == EventType.Repaint)
+                    GUI.Box(new Rect(15,15,1050,60),"Foliage lighting capture: hold the camera still. Saves automatically, then returns to Normal.\n"+(captureStatus ?? "Waiting for the main camera. A brief pause while saving is expected."));
+                return;
+            }
             if (Event.current.type == EventType.Repaint && (settings.View.Value == OcclusionView.ScreenSpaceContactGI || settings.View.Value == OcclusionView.ScreenSpaceContactGIHistory))
             { DrawColorBleedDiagnostic(); return; }
             if(Event.current.type != EventType.Repaint || !settings.Enabled.Value || settings.View.Value == OcclusionView.Normal || diagnostic == null) return;
@@ -161,6 +187,51 @@ namespace FuckTheseFX.Source.Occlusion
                 GUI.Box(new Rect(15,15,1050,70),stage+"\n"+legend+"\nCyan: no CustomAmbient capture. Requires XeGTAO + CustomAmbient fix. Excludes reflections/direct lights. Diagnostic view adds GPU work.");
             }
             GUI.depth = old; GUI.color = color;
+        }
+        private void UpdateFoliageCapture()
+        {
+            if(!settings.FoliageCapture) { captureStarted=0; return; }
+            if(captureStarted==0) { captureStarted=Time.realtimeSinceStartup;captureStatus=null; }
+            var main=CameraManager.Instance != null ? CameraManager.Instance.Camera : null;
+            var capture=main!=null?FoliageTarget(main):null;
+            // Read the previous completed frame, before the next camera recording mutates the targets.
+            if(capture != null && capture.Frames>=3 && capture.Frame<Time.frameCount)
+            {
+                try
+                {
+                    string folder=capture.Save(System.IO.Path.Combine(BepInEx.Paths.BepInExRootPath,"FuckTheseFX","FoliageDiagnostics"));
+                    Plugin.MyLog.LogInfo("Foliage lighting capture saved: "+folder);
+                }
+                catch(Exception error) { Plugin.MyLog.LogError("Foliage capture could not be saved: "+error); }
+                finally { settings.View.Value=OcclusionView.Normal;captureStarted=0; }
+            }
+            else if(Time.realtimeSinceStartup-captureStarted>15)
+            {
+                Plugin.MyLog.LogWarning("Foliage capture timed out: no active main-camera XeGTAO frames. Enable XeGTAO and game AO in a raid, then retry.");
+                settings.View.Value=OcclusionView.Normal;captureStarted=0;
+            }
+        }
+        private void DrawFoliageLive()
+        {
+            if(Event.current.type != EventType.Repaint) return;
+            var main=CameraManager.Instance != null ? CameraManager.Instance.Camera : null;
+            var live=main != null && settings.Enabled.Value ? LiveTarget(main) : null;
+            int oldDepth=GUI.depth; var oldColor=GUI.color;
+            try
+            {
+                GUI.depth=1000; GUI.color=Color.white;
+                bool scene=settings.FoliagePreview.Value==FoliageLivePreview.Scene;
+                if(live != null && !scene) GUI.DrawTexture(new Rect(0,0,Screen.width,Screen.height),live.Display,ScaleMode.StretchToFill,false);
+                if(live != null && live.OpaqueFound && scene && settings.FoliageSplit.Value && settings.FoliageExtraAO.Value>0)
+                    GUI.DrawTexture(new Rect(Screen.width*settings.FoliageSplitPosition.Value,0,1,Screen.height),Texture2D.whiteTexture);
+                string status=live==null ? "Unavailable: requires active main-camera XeGTAO, game AO on, HDR and Custom Ambient Fix strength above zero." :
+                    !live.OpaqueFound ? "Opaque buffer missing or ambiguous: opaque bypass and extra AO are inactive; opaque previews are invalid." :
+                    "GI bypass: "+settings.FoliageBypassGI.Value+" | Opaque colour bypass: "+settings.FoliageBypassOpaque.Value+" | Extra AO: "+settings.FoliageExtraAO.Value.ToString("P0")+
+                    (settings.FoliageSplit.Value ? " (left original / right extra AO)" : " (whole scene)");
+                GUI.Box(new Rect(15,15,1120,100),"Foliage live | "+settings.FoliagePreview.Value+" | Extra AO: Advanced / XeGTAO. Previews: Advanced / Debug. Normal exits and resets bypasses.\n"+status+
+                    "\nStage previews are raw buffers; differences show absolute RGB change, not lost AO. BeforeOpaque includes extra AO; AfterOpaque is before bypass.\nNo dumps or restart needed. Main camera only. Temporary bypasses affect both sides; zero-alpha mask may include non-foliage.");
+            }
+            finally { GUI.depth=oldDepth; GUI.color=oldColor; }
         }
         private void DrawColorBleedDiagnostic()
         {

@@ -1,0 +1,374 @@
+#pragma kernel ReduceDepth
+#pragma kernel Trace
+#pragma kernel ResetRays
+#pragma kernel ClassifyRays
+#pragma kernel PrepareRayDispatch
+#pragma kernel FinishNativeDenoise
+#pragma kernel ClassifyAdaptive
+#pragma kernel ReconstructAdaptive
+#pragma target 5.0
+
+Texture2D<float> _DepthPrevious;
+RWTexture2D<float> _DepthOutput;
+Texture2D<float> _HiZ0,_HiZ1,_HiZ2,_HiZ3,_HiZ4,_HiZ5,_HiZ6,_HiZ7,_HiZ8,_HiZ9,_HiZ10,_HiZ11,_HiZ12,_HiZ13;
+Texture2D<float4> _Normals,_Specular,_Scene;
+RWTexture2D<float4> _RadianceOutput,_HitOutput;
+RWTexture2D<float4> _PointOutput;
+RWTexture2D<float4> _NativeTestOutput,_SurfaceOutput;
+Texture2D<float4> _NativeResolved,_NativeTestInput,_FilteredInput;
+Texture2D<float4> _PointInput;
+float4 _SampleOffset;
+float _EdgePixels;
+int _Stochastic,_Frame,_NativeResponse,_NativeTraceContract;
+#include "AMD/Sampling.hlsl"
+
+
+
+RWTexture2D<float4> _DenoiseOutput;
+float4x4 _Projection,_InverseProjection,_WorldToView;
+float4 _Size; // camera xy, trace zw
+float4 _Trace; // max distance, thickness, minimum smoothness, iteration limit
+float4 _Clip; // near, far, highest mip, reversed Z
+
+
+
+
+int _CompactRays;
+int _WriteRawRadiance,_WriteGuides,_AdaptiveRays,_AdaptiveHistory;
+RWTexture2D<float> _AdaptiveMaskOutput;
+Texture2D<float> _AdaptiveMask,_AdaptiveVariance,_AdaptiveSamples;
+Texture2D<float4> _AdaptiveGuide,_AdaptivePoint,_AdaptiveMotion;
+float4x4 _AdaptivePreviousClip,_AdaptivePreviousToCurrent;
+RWStructuredBuffer<uint> _RayList,_RayCount,_RayDispatch;
+groupshared uint groupRayCount,groupRayBase;
+
+[numthreads(1,1,1)]
+void ResetRays(uint3 id:SV_DispatchThreadID)
+{ _RayCount[0]=0; }
+
+[numthreads(1,1,1)]
+void PrepareRayDispatch(uint3 id:SV_DispatchThreadID)
+{
+    uint groups=(_RayCount[0]+63)/64;
+    // D3D11 permits at most 65535 groups per dimension. One empty group is
+    // portable across drivers; every lane exits when the list is empty.
+    _RayDispatch[0]=max(1,min(groups,65535));
+    _RayDispatch[1]=max(1,(groups+65534)/65535);_RayDispatch[2]=1;
+}
+
+[numthreads(8,8,1)]
+void FinishNativeDenoise(uint3 id:SV_DispatchThreadID)
+{
+    if(any(id.xy>=(uint2)_Size.zw))return;
+    float4 original=_NativeResolved.Load(int3(id.xy,0));
+    float smoothness=_PointInput.Load(int3(id.xy,0)).w;
+    float3 filtered=_FilteredInput.Load(int3(id.xy,0)).rgb;
+    int2 receiver=min((int2)((id.xy+.5)*_Size.xy/_Size.zw),(int2)_Size.xy-1);
+    bool excluded=smoothness<_Trace.z || all(_Normals.Load(int3(receiver,0))==0);
+    _RadianceOutput[id.xy]=float4(excluded?original.rgb:filtered,original.a);
+}
+
+float3 Position(float2 uv,float depth)
+{
+    float4 h=mul(_InverseProjection,float4(uv*2-1,depth,1));
+    return h.xyz/h.w;
+}
+
+float3 OctDecode(float2 p)
+{
+    float3 n=float3(p,1-abs(p.x)-abs(p.y));
+    float2 s=float2(n.x>=0?1:-1,n.y>=0?1:-1);
+    if(n.z<0)n.xy=(1-abs(n.yx))*s;
+    return normalize(n);
+}
+
+[numthreads(8,8,1)]
+void ReduceDepth(uint3 id:SV_DispatchThreadID)
+{
+    uint w,h,pw,ph; _DepthOutput.GetDimensions(w,h);_DepthPrevious.GetDimensions(pw,ph);
+    if(id.x>=w || id.y>=h)return;
+    int2 p=id.xy*2, hi=int2(pw,ph)-1;
+    _DepthOutput[id.xy]=min(min(_DepthPrevious.Load(int3(min(p,hi),0)),_DepthPrevious.Load(int3(min(p+int2(1,0),hi),0))),
+        min(_DepthPrevious.Load(int3(min(p+int2(0,1),hi),0)),_DepthPrevious.Load(int3(min(p+1,hi),0))));
+}
+float SceneDepth(int2 p,int mip)
+{
+    switch(mip) {
+        case 0:return _HiZ0.Load(int3(p,0));case 1:return _HiZ1.Load(int3(p,0));
+        case 2:return _HiZ2.Load(int3(p,0));case 3:return _HiZ3.Load(int3(p,0));
+        case 4:return _HiZ4.Load(int3(p,0));case 5:return _HiZ5.Load(int3(p,0));
+        case 6:return _HiZ6.Load(int3(p,0));case 7:return _HiZ7.Load(int3(p,0));
+        case 8:return _HiZ8.Load(int3(p,0));case 9:return _HiZ9.Load(int3(p,0));
+        case 10:return _HiZ10.Load(int3(p,0));case 11:return _HiZ11.Load(int3(p,0));
+        case 12:return _HiZ12.Load(int3(p,0));default:return _HiZ13.Load(int3(p,0));
+    }
+}
+float2 OctEncode(float3 n)
+{
+    n/=max(abs(n.x)+abs(n.y)+abs(n.z),.00001);
+    float2 s=float2(n.x>=0?1:-1,n.y>=0?1:-1);
+    return n.z>=0?n.xy:(1-abs(n.yx))*s;
+}
+float2 Project(float3 p)
+{
+    float4 h=mul(_Projection,float4(p,1));return h.xy/h.w*.5+.5;
+}
+float3 EyePosition(int2 pixel)
+{
+    float3 p=Position((pixel+.5)/_Size.xy,.5);
+    return p*(SceneDepth(pixel,0)/(-p.z));
+}
+float3 SurfaceNormal(int2 pixel,float3 center)
+{
+    // Select the closest depth neighbour in each axis to avoid crossing silhouettes.
+    int2 hi=(int2)_Size.xy-1;
+    float3 l=EyePosition(max(pixel-int2(1,0),0)),r=EyePosition(min(pixel+int2(1,0),hi));
+    float3 b=EyePosition(max(pixel-int2(0,1),0)),t=EyePosition(min(pixel+int2(0,1),hi));
+    float3 dx=abs(l.z-center.z)<abs(r.z-center.z)?center-l:r-center;
+    float3 dy=abs(b.z-center.z)<abs(t.z-center.z)?center-b:t-center;
+    return normalize(cross(dx,dy)+float3(0,0,1e-8));
+}
+
+bool EligibleReceiver(float4 encodedNormal,float smoothness,float depth)
+{
+    bool excluded=_NativeTraceContract!=0?smoothness<_Trace.z:smoothness<=_Trace.z;
+    return !excluded && depth>_Clip.x && depth<_Clip.y*.999 &&
+        !(_NativeTraceContract!=0 && all(encodedNormal==0));
+}
+
+void InitializeReceiver(uint2 id,int2 pixel,float smoothness,float depth,float3 normal,float3 p)
+{
+    if(_WriteRawRadiance!=0)_RadianceOutput[id]=0;
+    _NativeTestOutput[id]=0;
+    if(_WriteGuides!=0)
+    {
+        _HitOutput[id]=float4(0,depth,OctEncode(normal));
+        _PointOutput[id]=float4(0,0,0,smoothness);
+        float3 geometry=SurfaceNormal(pixel,p);
+        geometry=normalize(mul(geometry,(float3x3)_WorldToView));
+        _SurfaceOutput[id]=float4(depth,OctEncode(geometry),smoothness);
+    }
+}
+
+bool AdaptiveOmitted(uint2 id)
+{
+    return _AdaptiveRays!=0 && _AdaptiveMask.Load(int3(id/2,0))>0 &&
+        ((id.x^id.y)&1)!=(uint)(_Frame&1);
+}
+
+// One lane classifies a complete quad. Reject unstable history, animated normals,
+// receiver edges, mirrors and moving objects. Refresh each quad every fourth
+// frame, staggered across the grid to avoid a periodic whole-image quality pulse.
+[numthreads(8,8,1)]
+void ClassifyAdaptive(uint3 id:SV_DispatchThreadID)
+{
+    uint2 base=id.xy*2;
+    if(any(base>=(uint2)_Size.zw))return;
+    bool stable=_AdaptiveHistory!=0 && (((uint)_Frame+id.x+id.y*3)&3)!=0 && all(base+1<(uint2)_Size.zw);
+    float3 firstNormal=0;float firstDepth=0,firstSmoothness=0,firstHit=0;
+    [unroll] for(uint i=0;i<4;i++)
+    {
+        if(!stable)break;
+        uint2 receiver=base+uint2(i&1,i>>1);
+        int2 pixel=min((int2)((receiver+.5)*_Size.xy/_Size.zw),(int2)_Size.xy-1);
+        float4 encoded=_Normals.Load(int3(pixel,0));
+        float3 normal=normalize(encoded.xyz*2-1+float3(0,0,1e-7));
+        float depth=SceneDepth(pixel,0),smoothness=_Specular.Load(int3(pixel,0)).a;
+        if(!EligibleReceiver(encoded,smoothness,depth) || smoothness>.99 ||
+            length(_AdaptiveMotion.Load(int3(pixel,0)).xy*_Size.xy)>.25) {stable=false;break;}
+        float3 p=EyePosition(pixel);
+        float4 prev=mul(_AdaptivePreviousClip,float4(p,1));
+        float2 uv=prev.xy/prev.w*.5+.5;
+        if(prev.w<=0 || any(uv<=0) || any(uv>=1)) {stable=false;break;}
+        int2 old=min((int2)(uv*_Size.zw),(int2)_Size.zw-1);
+        float4 guide=_AdaptiveGuide.Load(int3(old,0)),priorHit=_AdaptivePoint.Load(int3(old,0));
+        // prev.w is positive previous eye depth for a perspective projection.
+        if(abs(guide.y-prev.w)>max(.01,prev.w*.002) || dot(normal,OctDecode(guide.zw))<.999 ||
+            abs(smoothness-priorHit.w)>.005 || _AdaptiveSamples.Load(int3(old,0))<4 ||
+            _AdaptiveVariance.Load(int3(old,0))>.01) {stable=false;break;}
+        // Reject disappearance of a previously reflected surface.
+        if(priorHit.z<0)
+        {
+            float3 now=mul(_AdaptivePreviousToCurrent,float4(priorHit.xyz,1)).xyz;
+            float2 hitUv=Project(now);
+            if(now.z>=-_Clip.x || any(hitUv<=0) || any(hitUv>=1)) {stable=false;break;}
+            int2 hp=min((int2)(hitUv*_Size.xy),(int2)_Size.xy-1);
+            if(abs(SceneDepth(hp,0)+now.z)>max(.05,abs(now.z)*.01)) {stable=false;break;}
+        }
+        if(i==0) {firstNormal=normal;firstDepth=depth;firstSmoothness=smoothness;firstHit=guide.x;}
+        else if(dot(firstNormal,normal)<.998 || abs(depth-firstDepth)>max(.01,depth*.002) ||
+            abs(smoothness-firstSmoothness)>.005 || abs(guide.x-firstHit)>.1)stable=false;
+    }
+    _AdaptiveMaskOutput[id.xy]=stable?1:0;
+}
+
+// Reuse radiance only AFTER native pass 1 has applied hit fog/visibility.
+// Never copy hit UVs to a different receiver or average the native alpha.
+[numthreads(8,8,1)]
+void ReconstructAdaptive(uint3 id:SV_DispatchThreadID)
+{
+    if(any(id.xy>=(uint2)_Size.zw))return;
+    float4 original=_NativeResolved.Load(int3(id.xy,0));
+    if(AdaptiveOmitted(id.xy))
+    {
+        uint2 a=id.xy^uint2(1,0),b=id.xy^uint2(0,1);
+        float hitA=_NativeTestInput.Load(int3(a,0)).w,hitB=_NativeTestInput.Load(int3(b,0)).w;
+        // Disagreement indicates a reflected silhouette. Preserve this receiver's
+        // native miss fallback instead of spreading a hit across that boundary.
+        if(hitA>0 && hitB>0)
+            original.rgb=(_NativeResolved.Load(int3(a,0)).rgb+_NativeResolved.Load(int3(b,0)).rgb)*.5;
+    }
+    _DenoiseOutput[id.xy]=original;
+}
+
+// SM5 equivalent of SSSR ray-list compaction. A group reserves one contiguous
+// span; ray order never affects the per-pixel blue-noise sample or hit record.
+[numthreads(8,8,1)]
+void ClassifyRays(uint3 id:SV_DispatchThreadID,uint lane:SV_GroupIndex)
+{
+    if(lane==0)groupRayCount=0;
+    GroupMemoryBarrierWithGroupSync();
+    bool eligible=false;uint offset=0;
+    if(all(id.xy<(uint2)_Size.zw))
+    {
+        int2 pixel=min((int2)((id.xy+_SampleOffset.xy)/_Size.zw*_Size.xy),(int2)_Size.xy-1);
+        float4 encodedNormal=_Normals.Load(int3(pixel,0));
+        float smoothness=_Specular.Load(int3(pixel,0)).a;
+        float depth=SceneDepth(pixel,0);
+        float3 normal=normalize(encodedNormal.xyz*2-1+float3(0,0,.0000001));
+        float3 p=Position((pixel+.5)/_Size.xy,.5);p*=depth/(-p.z);
+        InitializeReceiver(id.xy,pixel,smoothness,depth,normal,p);
+        eligible=EligibleReceiver(encodedNormal,smoothness,depth) && !AdaptiveOmitted(id.xy);
+        if(eligible)InterlockedAdd(groupRayCount,1,offset);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if(lane==0)InterlockedAdd(_RayCount[0],groupRayCount,groupRayBase);
+    GroupMemoryBarrierWithGroupSync();
+    if(eligible)_RayList[groupRayBase+offset]=id.y*(uint)_Size.z+id.x;
+}
+
+void TracePixel(uint3 id,bool initialize)
+{
+    if(any(id.xy>=(uint2)_Size.zw))return;
+    float2 uv=(id.xy+_SampleOffset.xy)/_Size.zw;
+    int2 pixel=min((int2)(uv*_Size.xy),(int2)_Size.xy-1);
+    float4 encodedNormal=_Normals.Load(int3(pixel,0));
+    float3 normal=encodedNormal.xyz*2-1;
+    float smoothness=_Specular.Load(int3(pixel,0)).a;
+    float depth=SceneDepth(pixel,0);
+    float3 p=Position((pixel+.5)/_Size.xy,.5);
+    p*=depth/(-p.z);
+    normal=normalize(normal+float3(0,0,.0000001));
+    if(initialize)InitializeReceiver(id.xy,pixel,smoothness,depth,normal,p);
+    if(!EligibleReceiver(encodedNormal,smoothness,depth))return;
+    if(AdaptiveOmitted(id.xy))return;
+    float3 n=normalize(mul((float3x3)_WorldToView,normal));
+    float3 direction=reflect(normalize(p),n);
+    float visibility=1;
+    if(_Stochastic!=0)
+    {
+        float alpha=max((1-smoothness)*(1-smoothness),.0001);
+        if(dot(-normalize(p),n)<=0)return;
+        direction=SampleReflectionVector(normalize(p),n,alpha,id.xy);
+        float cosine=dot(n,direction);
+        if(cosine<=0)return;
+        // Separable Smith G2/G1; native composition supplies material/Fresnel.
+        visibility=2*cosine/(cosine+sqrt(alpha*alpha+(1-alpha*alpha)*cosine*cosine));
+    }
+    if(_NativeResponse!=0)
+    {
+        // Installed pass 0: normalize(lerp(normal, reflectedDirection, smoothness))
+        // and discard rays travelling back towards the camera.
+        if(_Stochastic==0)direction=normalize(lerp(n,direction,smoothness));
+        if(direction.z>0 && (_Stochastic==0 || _NativeTraceContract!=0))return;
+    }
+    // Native starts at the receiver, without the legacy world-space offsets.
+    // The initial screen-space advance below keeps the origin texel out.
+    float3 start=_NativeTraceContract!=0?p:p+n*.025+direction*.025;
+    if(start.z>=-_Clip.x)return;
+    float distance=_Trace.x;
+    if(direction.z>0) distance=min(distance,(-_Clip.x*1.01-start.z)/direction.z);
+    if(distance<=.05)return;
+    float3 finish=start+direction*distance;
+    float2 a=Project(start), b=Project(finish), delta=b-a;
+    float pixels=max(abs(delta.x)*_Size.x,abs(delta.y)*_Size.y);
+    if(pixels<2 || any(a<=0) || any(a>=1))return;
+    float epsilon=.005/pixels;
+    float t=1.5/pixels;
+    float2 edge=float2(delta.x>=0?1:0,delta.y>=0?1:0);
+    float2 invDelta=float2(abs(delta.x)>1e-8?1/delta.x:1e20,abs(delta.y)>1e-8?1/delta.y:1e20);
+    float limit=1;
+    if(abs(delta.x)>1e-8)limit=min(limit,(edge.x-a.x)*invDelta.x);
+    if(abs(delta.y)>1e-8)limit=min(limit,(edge.y-a.y)*invDelta.y);
+    float iz0=1/(-start.z), iz1=1/(-finish.z);
+    int mip=0;
+    [loop] for(int iteration=0;iteration<(int)_Trace.w && t<limit;iteration++)
+    {
+        float2 current=a+delta*t;
+        if(any(current<=0) || any(current>=1))break;
+        float cellSize=exp2((float)mip);
+        int2 cell=(int2)floor(current*_Size.xy/cellSize);
+        float2 boundary=(cell+edge)*cellSize/_Size.xy;
+        float2 crossings=(boundary-a)*invDelta;
+        if(abs(delta.x)<=1e-8)crossings.x=1e20;
+        if(abs(delta.y)<=1e-8)crossings.y=1e20;
+        float next=min(limit,min(crossings.x,crossings.y));
+        next=max(next,t+epsilon);
+        float z0=1/lerp(iz0,iz1,t), z1=1/lerp(iz0,iz1,next);
+        float surface=SceneDepth(cell,mip);
+        if(max(z0,z1)<surface-.001)
+        {
+            t=next+epsilon;mip=min(mip+1,(int)_Clip.z);continue;
+        }
+        if(mip>0) { mip--;continue; }
+        if(surface<_Clip.y*.999 && min(z0,z1)<=surface+_Trace.y && max(z0,z1)>=surface)
+        {
+            float hitT=abs(iz1-iz0)>1e-9?(1/surface-iz0)/(iz1-iz0):t;
+            hitT=clamp(hitT,t,next);
+            float2 hitUv=a+delta*hitT;
+            int2 hitPixel=clamp((int2)(hitUv*_Size.xy),0,(int2)_Size.xy-1);
+            float3 hitNormal=_Normals.Load(int3(hitPixel,0)).xyz*2-1;
+            hitNormal=normalize(mul((float3x3)_WorldToView,hitNormal)+float3(0,0,.0000001));
+            float separation=length((hitUv-uv)*_Size.xy);
+            float facing=dot(hitNormal,-direction);
+            // Native does not reject the hit surface by its normal. Retain the
+            // bounded depth intersection; do not turn every behind-depth sample
+            // into a hit merely to match native's permissive stepping heuristic.
+            if(_NativeTraceContract!=0 || (separation>=2 && facing>.05))
+            {
+                float2 border=min(hitUv,1-hitUv)*_Size.xy;
+                float edgeConfidence=_EdgePixels>0?saturate(min(border.x,border.y)/_EdgePixels):1;
+                float confidence=_NativeTraceContract!=0?1:edgeConfidence*saturate((smoothness-_Trace.z)/.1)*saturate(facing*4)*visibility;
+                float residual=max(0,1/lerp(iz0,iz1,hitT)-surface);
+                if(_NativeTraceContract==0)confidence*=saturate(1-residual/max(_Trace.y,.001));
+                if(_WriteRawRadiance!=0)_RadianceOutput[id.xy]=float4(max(_Scene.Load(int3(hitPixel,0)).rgb,0),0);
+                if(_WriteGuides!=0)
+                {
+                    _HitOutput[id.xy]=float4(confidence,depth,OctEncode(normal));
+                    float3 hitPosition=Position(hitUv,.5);hitPosition*=surface/(-hitPosition.z);
+                    _PointOutput[id.xy]=float4(hitPosition,smoothness);
+                }
+                // Native pass 1 expects UV, traversal fraction, hit validity. Keep
+                // confidence separate so fogged radiance is not weighted twice.
+                _NativeTestOutput[id.xy]=float4(hitUv,(iteration+1)/_Trace.w,1);
+                return;
+            }
+        }
+        t=next+epsilon;mip=0;
+    }
+}
+
+[numthreads(8,8,1)]
+void Trace(uint3 id:SV_DispatchThreadID,uint3 group:SV_GroupID,uint lane:SV_GroupIndex)
+{
+    // Keep one compiled traversal kernel for both schedules: separate FXC
+    // specializations can reassociate floating-point hit-position arithmetic.
+    if(_CompactRays!=0)
+    {
+        uint index=(group.x+group.y*65535)*64+lane;
+        if(index>=_RayCount[0])return;
+        uint pixel=_RayList[index];id=uint3(pixel%(uint)_Size.z,pixel/(uint)_Size.z,0);
+    }
+    TracePixel(id,_CompactRays==0);
+}
+

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework><LangVersion>latest</LangVersion>
+    <AssemblyName>FTFX.NativeSsrProfiling</AssemblyName><Version>0.1.0</Version>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <SptInstallPath Condition="'$(SptInstallPath)' == ''">D:\Tarkov-SPT-4.1</SptInstallPath>
+    <OutputPath>../../obj/NativeSsrProfiling/plugin/</OutputPath>
+  </PropertyGroup>
+  <ItemDefinitionGroup><Reference><Private>false</Private></Reference></ItemDefinitionGroup>
+  <ItemGroup>
+    <Compile Include="ProfilingPlugin.cs"/><Compile Include="SsrPassHooks.cs"/><Compile Include="ResearchBridge.cs"/>
+    <Reference Include="BepInEx"><HintPath>$(SptInstallPath)/BepInEx/core/BepInEx.dll</HintPath></Reference>
+    <Reference Include="0Harmony"><HintPath>$(SptInstallPath)/BepInEx/core/0Harmony.dll</HintPath></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(SptInstallPath)/EscapeFromTarkov_Data/Managed/UnityEngine.dll</HintPath></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(SptInstallPath)/EscapeFromTarkov_Data/Managed/UnityEngine.CoreModule.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

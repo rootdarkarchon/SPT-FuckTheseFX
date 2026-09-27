@@ -1,6 +1,6 @@
 using BepInEx.Logging;
 using UnityEngine;
-namespace FuckTheseFX { internal static class Plugin { internal const string Guid="ftfx.fixture"; internal static ManualLogSource MyLog = new ManualLogSource("FTFX fixture"); } }
+namespace FuckTheseFX { internal static class Plugin { internal const string Guid="ftfx.fixture", Version="fixture"; internal static ManualLogSource MyLog = new ManualLogSource("FTFX fixture"); } }
 namespace EFT.Settings.Graphics { public enum ESSAOMode { Off,FastestPerformance,FastPerformance,HighQuality,HighestQuality,ColoredHighestQuality } }
 namespace EFT.CameraControl
 {

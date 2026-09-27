@@ -1,0 +1,67 @@
+# Glass Culling Fix
+
+Version 1.4.1 provides **F12 > Fuck These FX > Glass Culling Fix > Enabled**, on by default. It primarily helps on Streets of Tarkov. Existing saved preferences migrate from the old Glass Culling section; an existing new-name preference takes priority. It applies to the known `Global Fog/Transparent Reflective Specular` population on vehicles and buildings, without object-name or distance rules. AOReplacer does not bypass this feature.
+
+## What the installed manager does
+
+Audited against SPT 4.1 / EFT 40743 `Assembly-CSharp.dll`, SHA-256 `EE25CEE1259777B38ED8B3E7841FDC2DB3C98540B1469FA539B1FF183476E436`:
+
+- `PerfectCullingBakeGroup.Init` builds a runtime array from explicitly authored renderers. It intentionally omits `ShadowsOnly` renderers. There is no automatic traversal that enrolls siblings or children.
+- `Toggle(bool)` writes `Renderer.enabled` through the live prefix of that array. The same method separately updates `CullingObject` autocull visibility, analytic sources and the screen-distance switcher.
+- `RuntimeSetForceRenderingOff(bool)` writes `Renderer.forceRenderingOff` through that same prefix. `PerfectCullingCrossSceneContent.OnBakedLODVisbilityChanged` uses this route. Merely appending to the authored list after initialization would not repair either runtime route.
+- Cross-scene controllers apply their visibility queues from `Update`. The runtime renderer flags are the useful observation; `isGroupEnabled` alone does not describe all distance/force-off paths.
+- `PerfectCullingCrossSceneContentMeshes.Windows` is a separate serialized exclusion list. WindowsManager eligibility can exclude glass without proving a live WindowsManager owns it. The shipped Streets scenes do not contain that manager; its absence alone is not evidence of a failed initialization.
+
+The September 26 scene dump identified 15,515 active, enabled glass renderers on these exclusion lists without direct known culling membership. The earlier 8,040 missing-association candidates are a broader diagnostic population, **not a prediction of this feature's accepted count**. Native runtime ownership, material queues and conservative bounds checks are evaluated live.
+
+## Association and restoration
+
+Discovery requires a live non-hideout game and world. During native `Running`, `Runned`, `Starting` or `Started`, a `BaseLocalGame<EftGamePlayerOwner>` is ready when its native `PlayerOwner.Player` exists and belongs to the current `GameWorld`. These conditions are polled, so enabling during loading or initializing the feature later cannot miss an event. Other game types retain the `Started` fallback. Stopping/stopped states cancel discovery and restore glass; replacing either singleton invalidates associations. Discovery keeps the two-second quiet period after scene/group initialization and the staged work budget.
+
+The installed Fika `CoopGame.InitPlayer` awaits player creation, assigns the inherited `_playerOwner`, creates the player camera, and then calls `WaitForHostToStart`, which creates the Start Raid button. EFT's native `BaseLocalGame.CG_Run` also assigns the owner before loot setup. The fix uses these native owner/player/world properties, with no Fika reference or startup patch. It can scan while waiting at Start Raid; it does not wait for the later gameplay `Started` status or require the camera to be active. Fika keeps its own local-player field, so readiness deliberately does not depend on `BaseLocalGame.LocalPlayer`.
+
+Discovery uses the serialized window lists and exact `LODGroup.GetLODs()` membership across all levels. It preserves successful whole-LOD matches first, then resolves unmatched panes through individual model-part containers. This keeps separately controlled body, door and trunk renderers independent, and prevents an unrelated inactive part from rejecting an entire car.
+
+For a glass-only LOD, discovery examines at most two enclosing ancestors. Each examined assembly is limited to 128 transform nodes and 16 reference renderers; discovery yields per node and caches repeated assembly inspections. A large ancestor stops the precise assembly search; unmatched eligible glass then enters the parent fallback. The log calls this `enclosing-hierarchy-search-limit`: it is a node/reference count limit, not a limit on building dimensions. The precise resolver requires consistent ownership. The parent fallback below instead keeps glass available while any of the section's native groups is available.
+
+Within the selected part or assembly, all reference renderers must have the same nonempty set of initialized PerfectCulling owners. A reference may contain both opaque and transparent materials if at least one material is opaque/cutout. This permits a native-controlled mixed-material car body to drive its separate glass. The target itself must still be a pure-glass MeshRenderer. Aliased native groups and repeated target glass are deduplicated.
+
+### Parent fallback
+
+After preserving the precise matches, discovery walks each remaining eligible glass renderer toward its nearest actual `PerfectCullingCrossSceneGroup` ancestor. Candidate parent sections are indexed through staged transform traversal; each selected native root is traversed once, with yields per node, child and renderer. The traversal does not cross a nested native-controller boundary. No scene names, model names, distances or exact frame-name matching are required.
+
+The first parent whose native-owned opaque reference bounds contain the glass (10 cm tolerance per side) supplies the association. References from different native groups are allowed. The fallback observes the full runtime renderer membership of all those groups, including members outside the section, and all opaque/cutout references in the section without a known PerfectCulling runtime owner. Any available reference keeps the glass available. Inactive guards are retained so later activation can release suppression.
+
+Reference availability is deduplicated and shared between parent associations. Native group hooks update only tracked members touched by that group; additional owners of outside members are observed too. Aggregate availability transitions notify the associated glass. No entire building is rescanned on each callback or for each pane. A separate audit checks up to 128 shared references per Update for external changes. Unhooked changes can therefore take up to `ceil(referenceCount / 128)` frames to be noticed. Destruction, reparenting or movement of an anchor retires the cached-bounds association and releases its suppression.
+
+This intentionally trades culling precision for broader coverage: a visible reference can keep other hidden glass in its section available. Discovery retains the existing roughly 2 ms iterator budget; native object-enumeration calls and individual Unity calls are not hard real-time bounded. Parent indexing runs only after this raid readiness check and is discarded on reset/map changes.
+
+Glass already present in authored/runtime culling lists or controlled by a CullingObject is skipped. Mixed-material targets, shadow-only renderers and glass lacking a usable native association remain excluded. Missing or conflicting owners reject a precise match but may be handled by the guarded parent fallback. Glass bounds must fit inside the references' combined bounds, with 10 cm tolerance per side. No model names or distance thresholds are used.
+
+For precise matches, postfixes on both native visibility setters re-evaluate only the affected families. Glass is suppressed when none of its reference renderers is active, enabled and available for rendering. Any such peer restores availability. This follows native flags across all LOD levels; it does not use `Renderer.isVisible`, camera-frustum heuristics or a 200 m cutoff. Main and optic cameras inherit the same native authority; there is no separate main-camera-only visibility decision.
+
+The feature owns only additional `forceRenderingOff` flags. It never sets glass `enabled`, activates GameObjects, changes materials or modifies authored/baked/runtime group arrays. Broken windows therefore remain disabled when native visibility returns. Preexisting force-off flags are not claimed or cleared. As with any shared Unity boolean, an unrelated writer setting the same flag while it is already held cannot be distinguished; independently controlled populations are excluded where discoverable.
+
+Configuration off, plugin disable/disposal, scene changes and native group reinitialization release owned suppression. Runtime reinitialization triggers rediscovery after a two-second quiet period. A live enabled WindowsManager bypasses the feature. Destruction or reparenting of a reference renderer retires its association and releases its glass. A bounded audit of 32 families per Update handles external state changes and movement outside the selected part/assembly or its bounds; native hooked transitions are immediate, but unhooked changes may take up to `ceil(familyCount / 32)` frames to be noticed.
+
+Discovery is sliced with a roughly 2 ms work budget per Update; Unity object-enumeration calls themselves are not sliceable. Normal operation uses the affected-family callbacks and the bounded audit, with no repeated whole-scene discovery. Wait for **Glass culling ready** before benchmarking. Release builds emit one concise ready message with associated and initially suppressed renderer counts, plus bypass/failure messages when applicable. Detailed association/LOD counts and per-kind/rejection breakdowns are compiled only under `#if DEBUG`; parent fallback matches use kind `parent`. Match and rejection counts describe discovery, not live draw counts.
+
+This reuses existing native visibility; it does not create new baked groups or perform new occlusion tests. Shared hierarchy and bounds containment cannot prove glass and opaque geometry are visible from exactly the same viewpoints. Poor native visibility data, unsupported associations and independent lights remain outside its scope. Persistent shadow-only meshes and the native light/analytic visibility paths are unchanged.
+
+## Validation and test run
+
+Version 1.5.2 removes the stationary geometry/decal and shadow culling experiment after live testing showed ground flicker without a meaningful benefit. Its hooks and controls are gone; old saved settings are removed on startup. Glass culling retains the 1.5.1 discovery optimization: parent sections share native-group availability and index each group's full membership once. The bounded reference audit retains movement validation without repeating it for every new section subscription. The glass fixture also checks shared-group scaling at 512 and 1,024 sections, alongside visibility/restoration behavior.
+
+`scripts/Test-GlassCullingContracts.ps1` checks the installed managed contracts. `scripts/Test-GlassCulling.ps1` runs the production association/restoration code and actual Harmony hooks against small game fixtures in Unity 2022.3.43f1. Fixtures cover partial loading versus initialized player-owner readiness, automatic host-wait activation, late initialization, disabled settings, raid end, world replacement, hideout exclusion, independent multipart visibility, inactive unowned vehicle parts, mixed-material reference bodies, nested window assemblies, precise-stage broad/ambiguous assembly rejection, guarded parent fallback across multiple owner groups, full-group members outside a section and their other owners, nested controller boundaries, moved anchors, deduplication, reparenting, broken-window preservation and lifecycle restoration. Fixtures do not establish live raid behavior, correct baked visibility or a performance gain.
+
+For one useful test session:
+
+1. At the benchmark viewpoint, enable Glass Culling Fix and wait for the ready log. Capture its associated/initially suppressed counts, then compare stable off/on timings after discovery has completed. Re-enabling requires discovery again. Per-kind and skip details require a Debug build.
+2. Move around nearby cars and building windows, turn back, and use optics. Check that visible glass returns with the opaque object; off should restore the baseline immediately.
+3. Break a window and repeat the movement/off/on comparison. It must remain broken. Record any popping with the viewpoint and object, plus the BepInEx log.
+
+The association log and the existing glass attribution/suppression tools can establish coverage and cost; the pink overlay alone is not a correctness check for native visibility.
+
+## Offline coverage evidence
+
+The September 26 dump analysis found 6,407 renderers unmatched by the precise resolver. Applying a guarded parent-section rule to its recorded states predicted 5,186 additional suppressions (4,866 from the 6,030 hierarchy-limit subset). A whole-asset rule predicted 3,859. These are offline renderer counts, including LODs and shards, not draw-call savings or guaranteed live coverage. Runtime lifecycle, inactive guards and nested controller boundaries can change the accepted population. The sequential dump and the Unity fixtures do not establish live visual correctness or performance gains.

@@ -31,7 +31,12 @@ public static partial class OcclusionValidation
    using(var assets=new GpuAssets(Path.GetFullPath("Output/Plugin.dll")))
    {
     Composition(assets);
+    DistanceFading(assets);
     AmbientDrawInstrumentation(assets);
+    FoliageCapturePipeline(assets);
+    FoliageLiveShader(assets);
+    FoliageLivePipeline(assets);
+    PersistentFoliageAO(assets);
     BentPipeline(assets);
     BentCameraIsolation(assets);
     ActorEquivalence(assets,256,144);
@@ -51,7 +56,12 @@ public static partial class OcclusionValidation
   catch(Exception error) { Debug.LogException(error); File.WriteAllText("failure.txt",error.ToString()); EditorApplication.Exit(1); }
  }
  private static void Require(bool condition,string message) { if(!condition) throw new Exception(message); }
- private static Material Material(GpuAssets assets) => new Material(assets.Composite);
+ private static Material Material(GpuAssets assets)
+ {
+  var material=new Material(assets.Composite);
+  material.SetVector("_AOFade",new Vector4(35,1f/65,0,1));
+  return material;
+ }
  private static void Clear(RenderTexture rt,Color color) { var previous=RenderTexture.active; RenderTexture.active=rt; GL.Clear(false,true,color); RenderTexture.active=previous; }
  private static Color Read(RenderTexture rt)
  {

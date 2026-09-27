@@ -36,6 +36,10 @@ Shader "Hidden/FuckTheseFX/WriteScreenAmbient"
     RWTexture2D<float4> _FTFX_CA_DebugOutput : register(u1);
     float4 _FTFX_CA_DebugInfo; // view, gain, width, height
     float _FTFX_CA_DebugAvailable;
+    #ifdef FTFX_FOLIAGE_CAPTURE
+     RWTexture2D<float4> _FTFX_CA_UnoccludedOutput : register(u2);
+     RWTexture2D<float4> _FTFX_CA_RemovedOutput : register(u3);
+    #endif
    #endif
    samplerCUBE _MyGlobalReflectionProbe;
    float4 _SHAr, _SHAg, _SHAb, _SHBr, _SHBg, _SHBb, _SHC;
@@ -153,6 +157,18 @@ Shader "Hidden/FuckTheseFX/WriteScreenAmbient"
      }
      int2 debugPixel = clamp((int2)(uv * _FTFX_CA_DebugInfo.zw),int2(0,0),(int2)_FTFX_CA_DebugInfo.zw-1);
      _FTFX_CA_DebugOutput[debugPixel] = float4(display,1);
+     #ifdef FTFX_FOLIAGE_CAPTURE
+     if (mode == 18) {
+      float original = tex2D(_FTFX_CA_OriginalOcclusion,uv).r;
+      float separate = _FTFX_CA_SeparateAOAvailable > .5 ? SeparateVisibility(uv) : 1;
+      float status = _FTFX_CA_MaterialCaptured < .5 ? 2 : (_FTFX_CA_SeparateAOAvailable < .5 ? 3 : 1);
+      // Unclipped, ungained values from THIS fragment, before HDR/LDR target encoding.
+      // The alpha sentinel distinguishes no ambient draw (0) from valid black lighting (1).
+      _FTFX_CA_DebugOutput[debugPixel] = float4(ao,separate,original < (.5/255.0) ? 1 : 0,status);
+      _FTFX_CA_UnoccludedOutput[debugPixel] = float4(diffuse+fill,1);
+      _FTFX_CA_RemovedOutput[debugPixel] = float4((diffuse+fill)*(1-ao),1);
+     }
+     #endif
     }
     #endif
     float3 ambient = reflection + diffuse * ao + fill * ao;
@@ -174,6 +190,7 @@ Shader "Hidden/FuckTheseFX/WriteScreenAmbient"
    #pragma multi_compile __ UNITY_HDR_ON
    #pragma multi_compile_local __ FTFX_BENT_NORMALS
    #pragma multi_compile_local __ FTFX_BENT_DIAGNOSTICS
+   #pragma multi_compile_local __ FTFX_FOLIAGE_CAPTURE
    ENDCG
   }
   Pass {

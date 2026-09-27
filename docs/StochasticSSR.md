@@ -1,0 +1,13 @@
+# Stochastic SSR
+
+FTFX 1.6.0 integrates the accepted StochasticNative path. Basic settings expose Enabled (true) and Sampling mode (Native/Custom, default Native). Both use GGX stochastic tracing; the selector chooses native temporal reconstruction or adapted AMD reflection denoising. Native hit response, material mip filtering and final composition remain in both paths. Game SSR must be enabled. Optics stay native.
+
+Advanced defaults are taken from the installed 0.10.0 prototype configuration: 128 iterations, thickness 0.2 m, range limiting off, maximum distance 931.9296 m, temporal and spatial filtering on, eight history frames, adaptive rays on. Adaptive sampling only applies to Custom with both filters and at least four history frames. Native cutoff and square-grid resolution remain game-controlled. Streamlined output and efficient denoising are fixed on; compact dispatch is off. There is no config migration.
+
+`com.matsix.ssrsix` is a soft dependency and bypasses the entire feature before asset loading or Harmony patching. Its identity was verified against the installed SSRSix 1.0.0 plugin metadata. There is no prototype-presence check. Remove the standalone prototype when upgrading.
+
+Production tracing/denoising code lives in `Source/StochasticSSR`. Shader sources and pinned AMD dependencies, licenses and provenance live in `unity/StochasticSSR`; these are required to rebuild `Assets/stochasticssr`. The standalone prototype project, capture UI, comparison modes and prototype-only shader passes have been removed. Production uses ordinary Unity GPU markers. Only the compiled shader bundle and license notices ship.
+
+Run `scripts/Test-StochasticSSR.ps1` to validate the release hooks and rebuild `Assets/stochasticssr`, then `scripts/Build-Package.ps1`. The production fixture lives in `unity/StochasticSsrValidation`. It uses the archived, SHA256-pinned 0.10.0 prototype package under `bin/Research` only as an output comparison reference; no prototype source or standalone project is required. A normal FTFX build uses the checked-in shader bundle.
+
+Validation covers exact final RGBA parity for both backends against 0.10.0 across twelve frames, aliased source/destination, exactly one tracer and reconstruction, actual Harmony routing, native output when disabled or on non-main cameras, history resets, resource loss, suspend/re-enable, and SSRSix startup bypass. Release packaging checks source/bundle hashes, settings, lifecycle contracts and absence of prototype capture code. Unity fixtures do not establish live-game performance or visual behavior of this integrated build.

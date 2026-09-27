@@ -6,19 +6,23 @@ using FuckTheseFX.Source.Bloom;
 using FuckTheseFX.Source.DistantShadows;
 using FuckTheseFX.Source.Occlusion;
 using FuckTheseFX.Source.Vintage;
+using FuckTheseFX.Source.GlassCulling;
+using FuckTheseFX.Source.StochasticSSR;
 
 namespace FuckTheseFX
 {
     [BepInPlugin(Guid, "Fuck These FX", Version)]
     [BepInDependency("com.matsix.sptaoreplacer", BepInDependency.DependencyFlags.SoftDependency)]
+    [BepInDependency(StochasticSsrIntegration.SsrsixGuid, BepInDependency.DependencyFlags.SoftDependency)]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Guid = "com.rootdarkarchon.fuckthesefx";
-        public const string Version = "1.3.11";
+        public const string Version = "1.6.0";
         internal static ManualLogSource MyLog;
         internal static ConfigEntry<bool> AmbientHighlightEnabled, BloomUseNativeResolution, DistantShadowSamplingEnabled;
         internal static ConfigEntry<bool> BloomEnabled, DistantShadowsEnabled;
         internal static ConfigEntry<bool> VintageEnabled;
+        internal static ConfigEntry<bool> GlassCullingEnabled;
         internal static ConfigEntry<float> BloomInputScale;
         internal static ConfigEntry<DistantShadowMaskResolution> DistantShadowResolution;
         internal static ConfigEntry<int> DistantShadowQuarterSamples, DistantShadowHalfSamples, DistantShadowFullSamples;
@@ -29,6 +33,9 @@ namespace FuckTheseFX
         internal static OcclusionSettings Occlusion;
         private XeGTAOIntegration occlusion;
         private VintageFilterIntegration vintage;
+        private GlassCullingIntegration glassCulling;
+        internal static SsrSettings Ssr;
+        private StochasticSsrIntegration ssr;
 
         private void Awake()
         {
@@ -39,6 +46,10 @@ namespace FuckTheseFX
             sampling = new DistantShadowSamplingIntegration();
             resolution = new DistantShadowResolutionIntegration();
             vintage = new VintageFilterIntegration();
+            glassCulling = new GlassCullingIntegration();
+            ssr = new StochasticSsrIntegration(Info.Location, Ssr);
+            FeatureStartup.TryInitialize("Stochastic SSR", ssr.Initialize);
+            FeatureStartup.TryInitialize("Glass culling", glassCulling.Initialize);
             FeatureStartup.TryInitialize("Vintage filter", vintage.Initialize);
             FeatureStartup.TryInitialize("Ambient Highlight", highlight.Initialize);
             FeatureStartup.TryInitialize("Bloom", bloom.Initialize);
@@ -55,6 +66,8 @@ namespace FuckTheseFX
 
         internal static void BindSettings(ConfigFile config)
         {
+            RemoveRetiredSettings(config);
+            GlassCullingEnabled = BindGlassCulling(config);
             AmbientHighlightEnabled = config.Bind("Ambient Highlight", "Enabled", false,
                 "When enabled uses vanilla Tarkovs behavior: Adds extra ambient brightness to weapons, hands and selected objects. Off removes this artificial glow. Performance: no measurable impact.");
             VintageEnabled = config.Bind("Vintage Filter", "Enabled", false,
@@ -80,6 +93,43 @@ namespace FuckTheseFX
             DistantShadowFullSamples = BindAdvanced(config, "Distant Shadows", "Full filter samples", 8,
                 new ConfigDescription("More samples smooth full-resolution shadow edges and reduce flicker. 25 uses native filtering.", new AcceptableValueRange<int>(1, 25)));
             Occlusion = new OcclusionSettings(config);
+            Ssr = new SsrSettings(config);
+        }
+
+        private static void RemoveRetiredSettings(ConfigFile config)
+        {
+            bool save = config.SaveOnConfigSet;
+            config.SaveOnConfigSet = false;
+            try
+            {
+                // Bind/remove also consumes orphaned entries saved by retired experiments.
+                config.Remove(config.Bind("Debug", "Foliage live extra AO", "").Definition);
+                foreach (var key in new[] { "Stationary geometry and decals", "Experimental shadow culling" })
+                    config.Remove(config.Bind("Scene Culling", key, "").Definition);
+            }
+            finally { config.SaveOnConfigSet = save; if (save) config.Save(); }
+        }
+
+        private static ConfigEntry<bool> BindGlassCulling(ConfigFile config)
+        {
+            if (config.TryGetEntry<bool>("Glass Culling Fix", "Enabled", out var existing)) return existing;
+            // Read both names before removing the legacy key; a saved new preference takes priority.
+            bool save = config.SaveOnConfigSet;
+            config.SaveOnConfigSet = false;
+            try
+            {
+                var legacy = config.Bind("Glass Culling", "Enabled", "");
+                string oldValue = legacy.Value;
+                config.Remove(legacy.Definition);
+                var current = config.Bind("Glass Culling Fix", "Enabled", "");
+                string newValue = current.Value;
+                config.Remove(current.Definition);
+                var entry = config.Bind("Glass Culling Fix", "Enabled", true,
+                    "Makes omitted glass follow native culling of vehicle parts, windows and enclosing building sections. Primarily helps performance on Streets of Tarkov. Off restores normal glass rendering.");
+                if (bool.TryParse(newValue, out bool value) || bool.TryParse(oldValue, out value)) entry.Value = value;
+                return entry;
+            }
+            finally { config.SaveOnConfigSet = save; if (save) config.Save(); }
         }
 
         private static ConfigEntry<T> BindAdvanced<T>(ConfigFile config, string section, string key, T value, string description) =>
@@ -93,10 +143,17 @@ namespace FuckTheseFX
         {
             highlight?.Update(); sampling?.Update(); resolution?.Update();
             occlusion?.Update();
+            glassCulling?.Update();
+            ssr?.Update();
         }
+
+        private void OnDisable() { glassCulling?.Suspend(); ssr?.Suspend(); }
+        private void OnEnable() { ssr?.Resume(); }
 
         private void OnDestroy()
         {
+            glassCulling?.Dispose();
+            ssr?.Dispose();
             vintage?.Dispose();
             occlusion?.Dispose(); sampling?.Dispose(); resolution?.Dispose(); highlight?.Dispose(); bloom?.Dispose();
         }

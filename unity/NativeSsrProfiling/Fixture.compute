@@ -1,0 +1,9 @@
+#pragma kernel Main
+Texture2D<float4> _Source;
+RWTexture2D<float4> _Result;
+[numthreads(8,8,1)]
+void Main(uint2 p : SV_DispatchThreadID)
+{
+    uint w,h; _Result.GetDimensions(w,h);
+    if (p.x < w && p.y < h) _Result[p] = _Source.Load(int3(p*2,0));
+}
