@@ -49,7 +49,7 @@ namespace FuckTheseFX.Source.GlassCulling
             available += delta;
             if (wasHidden != (available == 0))
             {
-                foreach (var family in Families) family.Apply();
+                foreach (var family in Families) family.Apply(false);
             }
         }
 

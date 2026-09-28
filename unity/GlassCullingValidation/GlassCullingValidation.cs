@@ -98,6 +98,12 @@ public static class GlassCullingValidation
         typeof(GlassCullingIntegration).GetField("scanAfter", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(feature, -1f);
         for (int i = 0; i < 100; i++) feature.Update();
     }
+    private static void Repair(GlassCullingIntegration feature)
+    {
+        // Advance maintenance opportunities explicitly, without sleeping in editor tests.
+        var timer = typeof(GlassCullingIntegration).GetField("nextAuditAt", BindingFlags.NonPublic | BindingFlags.Instance);
+        for (int i = 0; i < 64; i++) { timer.SetValue(feature, -1f); feature.Update(); }
+    }
     private static Renderer Mesh(Transform parent, string name, Material material, Vector3 scale)
     {
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -105,6 +111,73 @@ public static class GlassCullingValidation
         var renderer = go.GetComponent<Renderer>(); renderer.sharedMaterial = material;
         return renderer;
     }
+    public static void RunUpdateBenchmark()
+    {
+        var root = new GameObject("steady glass Update benchmark");
+        GlassCullingIntegration feature = null;
+        Material opaque = null, glassMaterial = null;
+        try
+        {
+            opaque = new Material(Shader.Find("Standard"));
+            glassMaterial = new Material(Shader.Find("Global Fog/Transparent Reflective Specular"));
+            var game = root.AddComponent<AbstractGame>(); game.Status = GameStatus.Started;
+            Singleton<AbstractGame>.Instance = game; Singleton<GameWorld>.Instance = root.AddComponent<GameWorld>();
+            const int sections = 512;
+            var bodies = new Renderer[sections]; var candidates = new List<GlassCullingParentIndex.Candidate>();
+            for (int i = 0; i < sections; i++)
+            {
+                var part = new GameObject("section"); part.transform.SetParent(root.transform, false);
+                part.transform.localPosition = Vector3.right * (i * 8);
+                bodies[i] = Mesh(part.transform, "frame", opaque, Vector3.one * 4);
+                var lod = part.AddComponent<LODGroup>(); var panes = new Renderer[4];
+                for (int j = 0; j < panes.Length; j++)
+                {
+                    panes[j] = Mesh(part.transform, "glass", glassMaterial, Vector3.one);
+                    candidates.Add(new GlassCullingParentIndex.Candidate { Lod = lod, Glass = panes[j] });
+                }
+                lod.SetLODs(new[] { new LOD(.01f, panes) });
+            }
+            var group = new PerfectCullingBakeGroup { renderers = bodies }; group.Init(); group.Toggle(false);
+            var controller = root.AddComponent<PerfectCullingCrossSceneGroup>(); controller.bakeGroups = new[] { group };
+            var owners = new Dictionary<Renderer, HashSet<PerfectCullingBakeGroup>>();
+            foreach (var body in bodies) owners.Add(body, new HashSet<PerfectCullingBakeGroup> { group });
+            var index = new GlassCullingParentIndex();
+            foreach (var step in index.Build(candidates, new Dictionary<Transform, PerfectCullingCrossSceneGroup> { { root.transform, controller } }, owners)) { }
+            Plugin.GlassCullingEnabled.Value = true; feature = new GlassCullingIntegration(); feature.Initialize(); feature.Update();
+            var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            var familyList = (List<GlassCullingFamily>)typeof(GlassCullingIntegration).GetField("families", flags).GetValue(feature);
+            for (int i = 0; i < candidates.Count; i += 4)
+            {
+                var c = candidates[i]; var panes = new[] { c.Glass, candidates[i+1].Glass, candidates[i+2].Glass, candidates[i+3].Glass };
+                var family = new GlassCullingFamily(c.Lod, Array.Empty<Renderer>(), panes, new[] { group }, c.Match.Root, "parent", c.Match);
+                c.Match.Families.Add(family); familyList.Add(family); family.Apply();
+            }
+            typeof(GlassCullingIntegration).GetField("parentIndex", flags).SetValue(feature, index);
+            typeof(GlassCullingIntegration).GetField("pending", flags).SetValue(feature, false);
+            var nextAudit = typeof(GlassCullingIntegration).GetField("nextAuditAt", flags);
+            nextAudit?.SetValue(feature, float.MaxValue);
+            for (int i = 0; i < 100; i++) feature.Update();
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            for (int i = 0; i < 2000; i++) feature.Update();
+            watch.Stop();
+            var result = $"families={sections}, glass={candidates.Count}, calls=2000, idleUpdateMeanMs={watch.Elapsed.TotalMilliseconds / 2000:F6}";
+            if (nextAudit != null)
+            {
+                watch.Restart();
+                for (int i = 0; i < 200; i++) { nextAudit.SetValue(feature, -1f); feature.Update(); }
+                watch.Stop();
+                result += $", forcedMaintenanceMeanMs={watch.Elapsed.TotalMilliseconds / 200:F6}";
+            }
+            File.WriteAllText(nextAudit == null ? "update-baseline.txt" : "update-optimized.txt", result);
+        }
+        catch (Exception error) { Debug.LogException(error); EditorApplication.Exit(1); }
+        finally
+        {
+            feature?.Dispose(); Object.DestroyImmediate(root); Object.DestroyImmediate(opaque); Object.DestroyImmediate(glassMaterial);
+            Singleton<AbstractGame>.Instance = null; Singleton<GameWorld>.Instance = null;
+        }
+    }
+
     public static void Run()
     {
         GlassCullingIntegration feature = null;
@@ -169,6 +242,20 @@ public static class GlassCullingValidation
             game.Status = GameStatus.Started;
             Plugin.GlassCullingEnabled.Value = true; feature.Update(); Discover(feature);
             Check(glass.forceRenderingOff, "Discovery applies initial native state");
+            var auditTimer = typeof(GlassCullingIntegration).GetField("nextAuditAt", BindingFlags.NonPublic | BindingFlags.Instance);
+            auditTimer.SetValue(feature, float.MaxValue);
+            body1.enabled = true; // Deliberately bypass the native visibility hooks.
+            for (int i = 0; i < 100; i++) feature.Update();
+            Check(glass.forceRenderingOff, "Idle frames do not poll renderer state before the maintenance deadline");
+            Repair(feature);
+            Check(!glass.forceRenderingOff, "Scheduled maintenance repairs an unhooked renderer change");
+            group.Toggle(false);
+            glass.forceRenderingOff = false;
+            group.Toggle(false);
+            Check(!glass.forceRenderingOff, "Repeated unchanged native state skips pane writes");
+            Repair(feature);
+            Check(glass.forceRenderingOff, "Maintenance still repairs externally cleared owned suppression");
+            auditTimer.SetValue(feature, float.MaxValue);
             group.Toggle(true); Check(!glass.forceRenderingOff, "Patched native Toggle restores immediately");
             group.RuntimeSetForceRenderingOff(true); Check(glass.forceRenderingOff, "Patched baked LOD suppression propagates immediately");
             group.RuntimeSetForceRenderingOff(false); Check(!glass.forceRenderingOff, "Patched baked LOD restoration propagates immediately");
@@ -197,7 +284,7 @@ public static class GlassCullingValidation
             Singleton<AbstractGame>.Instance = game; game.GameType = EGameType.Hideout; feature.Update(); Discover(feature);
             Check(!glass.forceRenderingOff, "Started hideout does not trigger raid discovery");
             game.GameType = EGameType.Offline; feature.Update(); Discover(feature);
-            Object.DestroyImmediate(body1.gameObject); feature.Update(); Check(!glass.forceRenderingOff, "Destroyed peer releases and retires association");
+            Object.DestroyImmediate(body1.gameObject); Repair(feature); Check(!glass.forceRenderingOff, "Destroyed peer releases and retires association");
             feature.Dispose(); Discover(feature); Check(!glass.forceRenderingOff, "Disposed integration cannot restart from Update");
             feature = null; Check(!glass.forceRenderingOff, "Dispose restores");
             Extended(glassMaterial, opaqueMaterial);
@@ -291,28 +378,28 @@ public static class GlassCullingValidation
             Check(matches.Find(f => Array.IndexOf(f.Glass, windshield) >= 0).Parent == null, "Precise matches retain priority over parent fallback");
             broadGroup.Toggle(false); broadOther.Toggle(false);
             Check(!broadGlass.forceRenderingOff, "Available unowned opaque guard prevents parent suppression");
-            unownedGuard.enabled = false; feature.Update();
+            unownedGuard.enabled = false; Repair(feature);
             Check(broadGlass.forceRenderingOff, "All native groups and unowned guard unavailable suppress parent glass");
             broadOther.Toggle(true); Check(!broadGlass.forceRenderingOff, "Any owner restores parent glass immediately");
             broadOther.RuntimeSetForceRenderingOff(true); Check(broadGlass.forceRenderingOff, "Parent consumes baked LOD force-off route");
             broadOther.RuntimeSetForceRenderingOff(false); Check(!broadGlass.forceRenderingOff, "Parent restores from baked LOD force-off route");
-            broadOther.Toggle(false); outsidePeer.enabled = true; feature.Update();
+            broadOther.Toggle(false); outsidePeer.enabled = true; Repair(feature);
             Check(!broadGlass.forceRenderingOff, "Available native-group member outside section prevents suppression");
-            outsidePeer.enabled = false; feature.Update();
+            outsidePeer.enabled = false; Repair(feature);
             Check(broadGlass.forceRenderingOff, "External native-group member change is audited");
             outsideAlias.Toggle(true); Check(!broadGlass.forceRenderingOff, "Other owner of outside group member restores immediately");
             outsideAlias.Toggle(false); Check(broadGlass.forceRenderingOff, "Other owner of outside group member can suppress immediately");
-            unownedGuard.gameObject.SetActive(false); unownedGuard.enabled = true; feature.Update();
+            unownedGuard.gameObject.SetActive(false); unownedGuard.enabled = true; Repair(feature);
             Check(broadGlass.forceRenderingOff, "Inactive unowned guard does not prevent culling");
-            unownedGuard.gameObject.SetActive(true); feature.Update();
+            unownedGuard.gameObject.SetActive(true); Repair(feature);
             Check(!broadGlass.forceRenderingOff, "Reactivated unowned guard releases glass");
-            unownedGuard.enabled = false; feature.Update();
+            unownedGuard.enabled = false; Repair(feature);
             broadGlass.enabled = false; broadOther.Toggle(true); broadOther.Toggle(false);
             Check(!broadGlass.enabled && broadGlass.forceRenderingOff, "Parent preserves broken-window enabled state");
             broadGlass.enabled = true;
-            broadGlass.transform.localPosition = Vector3.up * 20; feature.Update();
+            broadGlass.transform.localPosition = Vector3.up * 20; Repair(feature);
             Check(!broadGlass.forceRenderingOff, "Glass leaving cached parent bounds releases suppression");
-            broadGlass.transform.localPosition = Vector3.zero; feature.Update();
+            broadGlass.transform.localPosition = Vector3.zero; Repair(feature);
             Check(broadGlass.forceRenderingOff, "Glass returning to valid bounds is suppressed again");
             Check(broadGroup.renderers.Length == 16 && broadOther.runtimeGroupDataSize == 2, "Parent fallback never edits native membership arrays");
 
@@ -328,7 +415,7 @@ public static class GlassCullingValidation
             pane.enabled = false; frameGroup.Toggle(false); frameGroup.Toggle(true);
             Check(!pane.enabled && !pane.forceRenderingOff, "Nested broken pane stays disabled"); pane.enabled = true;
             frameGroup.Toggle(false); Check(pane.forceRenderingOff, "Nested pane can be suppressed again");
-            pane.transform.SetParent(root.transform, true); feature.Update(); Check(!pane.forceRenderingOff, "Reparented glass releases old assembly association");
+            pane.transform.SetParent(root.transform, true); Repair(feature); Check(!pane.forceRenderingOff, "Reparented glass releases old assembly association");
             pane.transform.SetParent(glassRoot.transform, false);
 
             // The immediate container has two different owners: do not select one or climb past it.
@@ -341,7 +428,7 @@ public static class GlassCullingValidation
             owners[frame1] = owners[frame0];
             Check(GlassCullingResolver.SelectAdditional(paneLod, pane, new[] { pane }, inspected, owners,
                 new HashSet<Renderer> { pane }, new HashSet<GameObject>(), out _) == null, "Additional resolver preserves existing glass owner");
-            broadPeers[0].transform.SetParent(root.transform, true); feature.Update();
+            broadPeers[0].transform.SetParent(root.transform, true); Repair(feature);
             Check(!broadGlass.forceRenderingOff, "Lost parent reference retires aggregate and releases glass");
             bodyGroup.Toggle(false); mixedGroup.Toggle(false);
             feature.Suspend(); Check(!windshield.forceRenderingOff && !mixedGlass.forceRenderingOff && !pane.forceRenderingOff, "All added association kinds restore on reset");

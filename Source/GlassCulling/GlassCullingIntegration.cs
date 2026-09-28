@@ -24,6 +24,10 @@ namespace FuckTheseFX.Source.GlassCulling
         private bool initialized, enabled, pending, failed, managerPresent;
         private float scanAfter;
         private int auditCursor;
+        private float nextAuditAt;
+        private int auditTurn;
+        private const float AuditInterval = .25f;
+        private const double AuditBudgetMs = .1;
         private AbstractGame raid;
         private GameWorld raidWorld;
         private GlassCullingParentIndex parentIndex;
@@ -82,15 +86,9 @@ namespace FuckTheseFX.Source.GlassCulling
                         if (!scan.MoveNext()) { scan.Dispose(); scan = null; break; }
                     } while ((Stopwatch.GetTimestamp() - start) * 1000d / Stopwatch.Frequency < 2);
                 }
-                // Bounded repair for destruction, external renderer changes and moved windows.
-                // Native visibility transitions use the immediate hooks below, including optic changes.
-                int checks = Math.Min(32, families.Count);
-                while (checks-- > 0)
-                {
-                    if (auditCursor >= families.Count) auditCursor = 0;
-                    families[auditCursor++].Apply();
-                }
-                parentIndex?.Audit();
+                // Native hooks handle visibility immediately. Rare maintenance repairs unhooked
+                // changes; ordinary frames do no renderer/bounds audit, and never catch up missed ticks.
+                if (scan == null && !pending && Time.realtimeSinceStartup >= nextAuditAt) Maintain();
             }
             catch (Exception error) { Fail(error); }
         }
@@ -102,7 +100,7 @@ namespace FuckTheseFX.Source.GlassCulling
             try
             {
                 if (self.byGroup.TryGetValue(__instance, out var affected))
-                    foreach (var family in affected) family.Apply();
+                    foreach (var family in affected) family.Apply(false);
                 self.parentIndex?.GroupChanged(__instance);
             }
             catch (Exception error) { self.Fail(error); }
@@ -119,12 +117,35 @@ namespace FuckTheseFX.Source.GlassCulling
         private void SceneLoaded(Scene scene, LoadSceneMode mode) => Invalidate();
         private void SceneUnloaded(Scene scene) => Invalidate();
 
+        private void Maintain()
+        {
+            nextAuditAt = Time.realtimeSinceStartup + AuditInterval;
+            long start = Stopwatch.GetTimestamp();
+            int familyChecks = Math.Min(8, families.Count);
+            int referenceChecks = Math.Min(32, parentIndex?.ReferenceCount ?? 0);
+            // Carry the turn across bursts so neither class starves when a check exhausts the budget.
+            do
+            {
+                if (familyChecks == 0 && referenceChecks == 0) break;
+                bool familyTurn = (auditTurn++ & 3) == 0;
+                if (familyChecks > 0 && (familyTurn || referenceChecks == 0))
+                {
+                    if (auditCursor >= families.Count) auditCursor = 0;
+                    families[auditCursor++].Apply(); familyChecks--;
+                }
+                else { parentIndex.AuditOne(); referenceChecks--; }
+            } while ((Stopwatch.GetTimestamp() - start) * 1000d / Stopwatch.Frequency < AuditBudgetMs);
+            // Budget is checked between work items; one Unity call or a visibility notification
+            // cannot be interrupted. No whole-scene audit runs on this timer.
+        }
+
         private void Invalidate()
         {
             scan?.Dispose(); scan = null;
             parentIndex = null;
             foreach (var family in families) family.Restore();
             families.Clear(); byGroup.Clear(); auditCursor = 0;
+            nextAuditAt = Time.realtimeSinceStartup + AuditInterval; auditTurn = 0;
             pending = true; scanAfter = Time.realtimeSinceStartup + 2;
         }
 

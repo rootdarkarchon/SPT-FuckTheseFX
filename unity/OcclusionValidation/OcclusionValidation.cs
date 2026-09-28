@@ -31,6 +31,9 @@ public static partial class OcclusionValidation
    using(var assets=new GpuAssets(Path.GetFullPath("Output/Plugin.dll")))
    {
     Composition(assets);
+    ReflectionOcclusionShaders(assets);
+    DiffuseAfterDecals(assets);
+    ReflectionOcclusionLifecycle(assets);
     DistanceFading(assets);
     AmbientDrawInstrumentation(assets);
     FoliageCapturePipeline(assets);

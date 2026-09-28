@@ -1,6 +1,7 @@
 param(
     [string]$SptInstallPath = 'D:\Tarkov-SPT-4.1',
-    [string]$Unity = 'C:\Program Files\Unity 2022.3.43f1\Editor\Unity.exe'
+    [string]$Unity = 'C:\Program Files\Unity 2022.3.43f1\Editor\Unity.exe',
+    [switch]$Benchmark
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -15,11 +16,12 @@ foreach ($dependency in @('0Harmony.dll','Mono.Cecil.dll','Mono.Cecil.Mdb.dll','
 }
 Set-Content (Join-Path $project 'Packages\manifest.json') '{"dependencies":{}}'
 Set-Content (Join-Path $project 'ProjectSettings\ProjectVersion.txt') 'm_EditorVersion: 2022.3.43f1'
-$log = Join-Path $project 'validation.log'
+$log = Join-Path $project $(if ($Benchmark) { 'update-benchmark.log' } else { 'validation.log' })
+$entry = if ($Benchmark) { 'GlassCullingValidation.RunUpdateBenchmark' } else { 'GlassCullingValidation.Run' }
 $started = [DateTime]::UtcNow
-$process = Start-Process $Unity -ArgumentList @('-batchmode','-quit','-force-d3d11','-projectPath',('"'+$project+'"'),'-executeMethod','GlassCullingValidation.Run','-logFile',('"'+$log+'"')) -WindowStyle Hidden -PassThru -Wait
+$process = Start-Process $Unity -ArgumentList @('-batchmode','-quit','-force-d3d11','-projectPath',('"'+$project+'"'),'-executeMethod',$entry,'-logFile',('"'+$log+'"')) -WindowStyle Hidden -PassThru -Wait
 $process.Refresh()
 if ($process.ExitCode -ne 0) { throw "Glass culling validation failed ($($process.ExitCode)): $log" }
-$result = Get-Item -LiteralPath (Join-Path $project 'validation.txt')
+$result = Get-Item -LiteralPath (Join-Path $project $(if ($Benchmark) { 'update-optimized.txt' } else { 'validation.txt' }))
 if ($result.LastWriteTimeUtc -lt $started) { throw 'Stale glass culling result' }
 Get-Content -LiteralPath $result.FullName

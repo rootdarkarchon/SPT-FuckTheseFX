@@ -9,7 +9,7 @@ namespace FuckTheseFX.Source.Occlusion
     // Configuration owns policy; neither the GPU pipeline nor the camera owns saved preferences.
     internal sealed class OcclusionSettings
     {
-        internal ConfigEntry<bool> Enabled, Normals, Ambient, Actors, BentNormals;
+        internal ConfigEntry<bool> Enabled, Normals, Ambient, Actors, BentNormals, ReflectionOcclusion;
         internal ConfigEntry<float> Radius, RadiusMultiplier, Falloff, Distribution, Thickness, Sharpness, Power;
         internal ConfigEntry<float> FadeStart, FadeEnd;
         internal ConfigEntry<int> Slices, Steps, Denoise, Quality;
@@ -40,6 +40,7 @@ namespace FuckTheseFX.Source.Occlusion
             FadeEnd = Float("XeGTAO", "Distance fade end", 250, 1, 1000, "View depth in metres where primary AO reaches zero. Shared with the Custom Ambient Fix. Values below start + 1 use a one-metre fade after the start; saved values are preserved.");
             Normals = Advanced("XeGTAO", "UseNormals", true, "Use G-buffer normals including normal maps; off reconstructs geometric normals from depth.");
             Ambient = Advanced("XeGTAO", "Custom Ambient Fix Enabled", true, "Make custom diffuse ambient and fill respect XeGTAO. Does not change direct lights or Ambient Highlight.");
+            ReflectionOcclusion = Advanced("XeGTAO", "Reflection occlusion fix", true, "Reduce screen-space reflection occlusion by up to 50% on smooth surfaces, tapering with smoothness squared to no reduction on fully rough surfaces. Applies at every viewing angle. Excludes the native motion-depth vegetation path to preserve its reflection shading. Shares the corrected material visibility with native reflection probes and SSR, while preserving diffuse AO and authored material occlusion. Requires Custom Ambient Fix enabled with strength above zero. Toggle live to compare; off restores full screen-space reflection AO.");
             BentNormals = Advanced("XeGTAO", "Custom Ambient Fix Bent normals", false, "Use XeGTAO bent normals for directional SH ambient lighting. Requires XeGTAO and the CustomAmbient fix. Adds GPU work; leaves reflections, fill and the actor pass unchanged. Respects Strength, Foliage AO strength and the AO distance fade.");
             AmbientStrength = Float("XeGTAO", "Custom Ambient Fix Strength", .6f, 0, 1, "AO attenuation of custom diffuse ambient and fill. Zero restores native ambient.");
             Foliage = Float("XeGTAO", "Custom Ambient Fix Foliage AO strength", .65f, 0, 1, "AO strength on authored zero-alpha materials, including foliage.");

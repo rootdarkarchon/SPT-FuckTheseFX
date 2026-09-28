@@ -2,6 +2,8 @@
 
 For live foliage comparisons, temporary lighting bypasses and the optional single-frame capture, see [Foliage lighting tests](FoliageLightingTest.md).
 
+**XeGTAO / Reflection occlusion fix** (Advanced, default on) reduces screen-space reflection occlusion by up to 50% on smooth surfaces, tapering with smoothness squared to no reduction on fully rough surfaces. It works at every viewing angle, preserves diffuse AO and excludes the native motion-depth vegetation path. Requires the Custom Ambient Fix. See [reflection occlusion testing](ReflectionOcclusionTest.md) for live comparison and integration details.
+
 FuckTheseFX owns XeGTAO without an AOReplacer assembly, Amplify class, shader or render target. The Intel estimator and reviewed EFT 40743 CustomAmbient shader retain their provenance. Camera routing, allocation, deferred composition, fallback and configuration are implemented independently here.
 
 The normal AO controls are **XeGTAO / Enabled**, **XeGTAO / Quality** (0-3, default 3), and **XeGTAO / Second Pass Enabled**. XeGTAO tuning, CustomAmbient, actor tuning and debug settings remain available under Advanced. Values come from FuckTheseFX's configuration and defaults; no AOReplacer config is read. The FTFX Quality slider (0-3, default 3) selects the 1/2/3/9-slice presets for both AO passes unless primary sampling counts are overridden.
@@ -12,6 +14,7 @@ AOReplacer is a soft dependency for load ordering only. When its plugin ID is pr
 
 - EFT's SetSSAO runs normally. Per-camera native enabled states are captured, then native AO is suspended only after the replacement resources and commands are ready. Disabling XeGTAO, graphics AO Off, unsupported cameras, allocation failure and disposal restore native ownership.
 - Camera-owned inputs capture the original G-buffer material alpha and actor stencil after the G-buffer. Material alpha is bound explicitly at this event. Deferred primary composition changes only albedo alpha and ambient/emission RGB; LDR composition respects logarithmic encoding and uses a 10-bit emission copy.
+- Active CustomAmbient also preserves diffuse material/screen AO before later decals can overwrite the shared G-buffer alpha. This camera-owned R8 input is used with the reflection fix both on and off, so the reflection toggle does not control diffuse AO protection.
 - The primary result retains the selected intensity/power and uses the Advanced Distance fade start/end settings (defaults 100/250 metres of view depth). The same camera-owned curve drives deferred composition, CombinedAO, CustomAmbient foliage and bent normals. End values below start + 1 use a one-metre fade without rewriting saved settings. Raw AO views and the actor second-pass cutoff are independent. CustomAmbient uses it for authored zero-alpha foliage while preserving native reflection math. The native shader bundle hash is checked before patching ambient materials; unknown shaders retain native ambient.
 - Globals are reset before each camera and after rendering. Camera resources follow render-size changes and are removed on disable/destruction. Diagnostics use the current camera's outputs and leave configuration UI above the overlay.
 

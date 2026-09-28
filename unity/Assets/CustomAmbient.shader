@@ -16,6 +16,8 @@ Shader "Hidden/FuckTheseFX/WriteScreenAmbient"
    sampler2D _CameraGBufferTexture0, _CameraGBufferTexture1, _CameraGBufferTexture2;
    sampler2D _CameraMotionVectorsDepth;
    sampler2D _FTFX_CA_OriginalOcclusion, _FTFX_CA_ScreenAO;
+   sampler2D _FTFX_CA_DiffuseOcclusion;
+   float _FTFX_CA_DiffuseCaptured;
    float _FTFX_CA_MaterialCaptured, _FTFX_CA_SeparateAOAvailable, _FTFX_CA_FoliageStrength;
    float4 _FTFX_CA_AODecode, _FTFX_CA_AOFade;
    float SeparateVisibility(float2 uv) {
@@ -76,7 +78,8 @@ Shader "Hidden/FuckTheseFX/WriteScreenAmbient"
     float4 albedo = tex2D(_CameraGBufferTexture0,uv);
     float visibility = 1 - tex2D(_StencilShadow,uv).a;
 
-    // Preserve EFT's reflection path, including its existing material/screen AO use.
+    // All reflection consumers, including native SSR, share GBuffer0's reflection visibility.
+    // Keep native reflection composition intact; diffuse visibility is preserved separately below.
     float fresnel = pow(1 - abs(dot(unitNormal,-viewDirection)),5);
     float3 reflectance = lerp(spec.rgb, saturate(max(max(spec.r,spec.g),spec.b) + spec.a), fresnel);
     float roughness = 1 - spec.a;
@@ -124,7 +127,7 @@ Shader "Hidden/FuckTheseFX/WriteScreenAmbient"
     float ao = 1;
     if (_FTFX_CA_MaterialCaptured > .5) {
      float original = tex2D(_FTFX_CA_OriginalOcclusion,uv).r;
-     float visibilityAO = saturate(albedo.a);
+     float visibilityAO = _FTFX_CA_DiffuseCaptured > .5 ? tex2D(_FTFX_CA_DiffuseOcclusion,uv).r : saturate(albedo.a);
      if (original < (.5 / 255.0))
       visibilityAO = _FTFX_CA_SeparateAOAvailable > .5 ? lerp(1,SeparateVisibility(uv),_FTFX_CA_FoliageStrength) : 1;
      ao = lerp(1,visibilityAO,_FTFX_CAAmount);

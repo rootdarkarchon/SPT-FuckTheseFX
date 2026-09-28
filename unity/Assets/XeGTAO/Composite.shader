@@ -11,6 +11,9 @@ Shader "Hidden/FuckTheseFX/Occlusion"
   float _BentNormals;
   float4x4 _BentToWorld;
   Texture2D<float4> _CameraGBufferTexture2;
+  Texture2D<float4> _CameraGBufferTexture1;
+  sampler2D _CameraDepthTexture, _CameraMotionVectorsDepth;
+  float _ReflectionOcclusion;
   Texture2D<uint> _XeAO;
   Texture2D<float> _XeDepth;
   Texture2D<float> _ActorMask;
@@ -43,15 +46,32 @@ Shader "Hidden/FuckTheseFX/Occlusion"
    return saturate(1+(pow(max(ao.x,0),lerp(.8,_AOFade.w,fade))-1)*lerp(2,_AOFade.z,fade));
   }
   struct Outputs { float4 albedo:SV_Target0; float4 emission:SV_Target1; };
+  float ReflectionVisibility(Varyings i,float diffuse)
+  {
+   if(_ReflectionOcclusion < .5) return diffuse;
+   // Match CustomAmbient's native reduced-reflection path for instanced vegetation.
+   // Raising its shared alpha also raises SSR's probe subtraction, which lacks that reduction.
+   // Use the same UV sampling and raw-depth tolerance as CustomAmbient, not an AO/material guess.
+   float depth=tex2D(_CameraDepthTexture,i.uv).r;
+   if(tex2D(_CameraMotionVectorsDepth,i.uv).r >= depth-.00001) return diffuse;
+   int2 p=Pixel(i);
+   float3 normal=_CameraGBufferTexture2.Load(int3(p,0)).xyz*2-1;
+   float len=dot(normal,normal);
+   if(!all(isfinite(normal)) || len<.25 || len>1.5) return diffuse;
+   float smoothness=saturate(_CameraGBufferTexture1.Load(int3(p,0)).a);
+   // Partial screen-AO relief for glossy reflections, independent of viewing angle.
+   // Retain at least half the screen occlusion; authored material AO is multiplied separately.
+   return lerp(diffuse,1,.5*smoothness*smoothness);
+  }
   Outputs Deferred(Varyings i)
   {
    float v=Primary(_PrimaryAO.Load(int3(Pixel(i),0)));
-   Outputs o; o.albedo=v; o.emission=float4(v,v,v,1); return o;
+   Outputs o; o.albedo=ReflectionVisibility(i,v); o.emission=float4(v,v,v,1); return o;
   }
   Outputs DeferredLog(Varyings i)
   {
    float v=Primary(_PrimaryAO.Load(int3(Pixel(i),0)));
-   Outputs o; o.albedo=v;
+   Outputs o; o.albedo=ReflectionVisibility(i,v);
    // Emission is encoded as exp2(-radiance) in the LDR deferred buffer.
    o.emission=float4(pow(max(_Emission.Load(int3(Pixel(i),0)).rgb,1e-20),v),1);
    return o;
@@ -85,6 +105,7 @@ Shader "Hidden/FuckTheseFX/Occlusion"
   }
   Texture2D<float4> _FTFXMaterialInput;
   float4 MaterialAlpha(Varyings i):SV_Target { return _FTFXMaterialInput.Load(int3(Pixel(i),0)).aaaa; }
+  float4 DiffuseVisibility(Varyings i):SV_Target { return MaterialAlpha(i)*Primary(_PrimaryAO.Load(int3(Pixel(i),0))); }
   Texture2D<float> _LiveAlpha;
   Texture2D<float4> _LiveA, _LiveB;
   float4 _LiveSettings; // extra strength, divider (-1 full frame), far plane, unused
@@ -200,6 +221,14 @@ Shader "Hidden/FuckTheseFX/Occlusion"
    HLSLPROGRAM
    #pragma vertex Vert
    #pragma fragment LiveDisplay
+   ENDHLSL
+  }
+  Pass // 10
+  {
+   Name "PreserveDiffuseOcclusion"
+   HLSLPROGRAM
+   #pragma vertex Vert
+   #pragma fragment DiffuseVisibility
    ENDHLSL
   }
  }

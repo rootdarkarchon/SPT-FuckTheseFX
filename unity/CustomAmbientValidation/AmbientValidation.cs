@@ -179,6 +179,7 @@ public static partial class AmbientValidation
    CheckLightingBlend();
    CheckBentNormals();
    CheckFoliageCapture();
+   CheckReflectionOcclusionSeparation();
    File.WriteAllText("validation.txt","PASSED "+checks+" D3D11 shader checks. Worst strength-zero native parity error: "+worst+"\nGPU: "+SystemInfo.graphicsDeviceName);
    Debug.Log(File.ReadAllText("validation.txt"));
    UnityEngine.Object.DestroyImmediate(camera.gameObject);UnityEngine.Object.DestroyImmediate(quad);

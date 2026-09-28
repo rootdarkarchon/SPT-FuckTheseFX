@@ -46,6 +46,7 @@ namespace FuckTheseFX.Source.Occlusion
             b.AppendLine("Position="+camera.transform.position.ToString("F6")+" rotation="+camera.transform.rotation.ToString("F6")+" FOV="+camera.fieldOfView.ToString(CultureInfo.InvariantCulture));
             b.AppendLine("near="+camera.nearClipPlane+" far="+camera.farClipPlane+" target="+(camera.targetTexture != null ? camera.targetTexture.name : "backbuffer"));
             b.AppendLine("AmbientEnabled="+settings.Ambient.Value+" strength="+settings.AmbientStrength.Value+" foliage="+settings.Foliage.Value+" bent="+settings.BentNormals.Value);
+            b.AppendLine("ReflectionOcclusionFix="+settings.ReflectionOcclusion.Value);
             b.AppendLine("Fade="+settings.FadeStart.Value+".."+settings.FadeEnd.Value+" resolved="+settings.DistanceFade+" quality="+settings.Quality.Value);
             b.AppendLine("Radius="+settings.Radius.Value+" multiplier="+settings.RadiusMultiplier.Value+" power="+settings.Power.Value+" denoise="+settings.Denoise.Value+" normals="+settings.Normals.Value);
             b.AppendLine("ActorPass="+settings.Actors.Value+" contactGI="+settings.Bleed.Enabled.Value+" contactGIStrength="+settings.Bleed.Strength.Value);

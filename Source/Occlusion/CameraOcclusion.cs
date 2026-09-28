@@ -15,7 +15,7 @@ namespace FuckTheseFX.Source.Occlusion
         private FoliageOcclusion foliageAO;
         private bool bleedFailed, bleedUnsupportedWarned;
         private static string lastBleedUnsupportedReason;
-        private RenderTexture resolved, originalAlpha, actorMask, debug, rawDebug;
+        private RenderTexture resolved, originalAlpha, actorMask, debug, rawDebug, diffuseOcclusion;
         private readonly CommandBuffer reset, capture, calculate, actors, cleanup;
         private int width, height;
         private CameraEvent calculationEvent;
@@ -50,12 +50,16 @@ namespace FuckTheseFX.Source.Occlusion
 
         internal static void ResetGlobals(CommandBuffer cb)
         {
+            cb.SetGlobalFloat(Prefix+"DiffuseCaptured",0);
+            cb.SetGlobalTexture(Prefix+"DiffuseOcclusion",Texture2D.whiteTexture);
             cb.SetGlobalFloat(Prefix+"BentAvailable",0);
             cb.SetGlobalFloat(Prefix+"MaterialCaptured",0); cb.SetGlobalFloat(Prefix+"SeparateAOAvailable",0);
             cb.SetGlobalTexture(Prefix+"OriginalOcclusion",Texture2D.whiteTexture); cb.SetGlobalTexture(Prefix+"ScreenAO",Texture2D.whiteTexture);
         }
         internal static void ResetGlobals()
         {
+            Shader.SetGlobalFloat(Prefix+"DiffuseCaptured",0);
+            Shader.SetGlobalTexture(Prefix+"DiffuseOcclusion",Texture2D.whiteTexture);
             Shader.SetGlobalFloat(Prefix+"BentAvailable",0);
             Shader.SetGlobalFloat(Prefix+"MaterialCaptured",0); Shader.SetGlobalFloat(Prefix+"SeparateAOAvailable",0);
             Shader.SetGlobalTexture(Prefix+"OriginalOcclusion",Texture2D.whiteTexture); Shader.SetGlobalTexture(Prefix+"ScreenAO",Texture2D.whiteTexture);
@@ -107,6 +111,8 @@ namespace FuckTheseFX.Source.Occlusion
             composite.SetVector("_ActorSettings",new Vector4(settings.ActorStrength.Value,settings.ActorResponse.Value,settings.ActorCutoff.Value,0));
             composite.SetVector("_Debug",new Vector4((int)settings.View.Value,settings.DepthStart.Value,settings.DepthRange.Value,0));
             AmbientActive = ambientAvailable && settings.Ambient.Value && settings.AmbientStrength.Value > 0;
+            bool reflectionOcclusion = AmbientActive && settings.ReflectionOcclusion.Value;
+            composite.SetFloat("_ReflectionOcclusion",reflectionOcclusion ? 1 : 0);
             bool bent = AmbientActive && settings.BentNormals.Value;
             if(useLive)
             {
@@ -165,6 +171,17 @@ namespace FuckTheseFX.Source.Occlusion
             calculate.BeginSample("FTFX Primary composite");
             var primaryProperties = new MaterialPropertyBlock(); primaryProperties.SetTexture("_PrimaryAO",resolved);
             primaryProperties.SetTexture("_XeAO",primary.Result);
+            if(AmbientActive)
+            {
+                // Protect diffuse material*screen AO before later decals can overwrite GBuffer0 alpha.
+                // CustomAmbient uses this same input with reflection relief both on and off.
+                if(diffuseOcclusion == null) diffuseOcclusion = Target("Diffuse material AO",GraphicsFormat.R8_UNorm);
+                calculate.SetGlobalTexture("_FTFXMaterialInput",BuiltinRenderTextureType.GBuffer0);
+                calculate.SetRenderTarget(diffuseOcclusion); Draw(calculate,10,primaryProperties);
+                calculate.SetGlobalTexture(Prefix+"DiffuseOcclusion",diffuseOcclusion);
+                calculate.SetGlobalFloat(Prefix+"DiffuseCaptured",1);
+            }
+            else GpuAssets.Release(ref diffuseOcclusion);
             if(!camera.allowHDR)
             {
                 int emission = Shader.PropertyToID("_FTFX_EmissionCopy");
@@ -266,6 +283,7 @@ namespace FuckTheseFX.Source.Occlusion
             foliageAO?.Dispose(); foliageAO = null;
             GpuAssets.Release(ref resolved); GpuAssets.Release(ref originalAlpha); GpuAssets.Release(ref actorMask);
             GpuAssets.Release(ref debug); GpuAssets.Release(ref rawDebug);
+            GpuAssets.Release(ref diffuseOcclusion);
         }
         public void Dispose()
         {

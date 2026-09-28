@@ -16,6 +16,8 @@ namespace FuckTheseFX.Source.GlassCulling
         internal readonly GlassCullingParentScope Parent;
         private readonly bool[] forced;
         private bool retired;
+        private bool hasVisibility, lastHidden;
+        private int forcedCount;
 
         internal GlassCullingFamily(LODGroup lod, Renderer[] peers, Renderer[] glass, PerfectCullingBakeGroup[] owners,
             Transform scope = null, string kind = "lod", GlassCullingParentScope parent = null)
@@ -60,21 +62,28 @@ namespace FuckTheseFX.Source.GlassCulling
 
         internal static bool Encloses(Renderer[] peers, Renderer glass)
         {
-            if (peers.Length == 0 || !glass) return false;
-            var bounds = new Bounds();
+            if (!glass || !TryBounds(peers, null, out var bounds)) return false;
+            var glassBounds = glass.bounds;
+            return bounds.Contains(glassBounds.min) && bounds.Contains(glassBounds.max);
+        }
+
+        private static bool TryBounds(Renderer[] peers, Transform scope, out Bounds bounds)
+        {
+            bounds = new Bounds();
+            if (peers.Length == 0) return false;
             bool first = true;
             foreach (var peer in peers)
             {
-                if (!peer) return false;
+                if (!peer || (scope && !peer.transform.IsChildOf(scope))) return false;
                 if (first) { bounds = peer.bounds; first = false; }
                 else bounds.Encapsulate(peer.bounds);
             }
             // Ten centimetres per side permits coplanar windows and floating point error.
             bounds.Expand(.2f);
-            return bounds.Contains(glass.bounds.min) && bounds.Contains(glass.bounds.max);
+            return true;
         }
 
-        internal int Apply()
+        internal int Apply(bool validate = true)
         {
             if (retired) return 0;
             if (!Lod || !Scope) { Retire(); return 0; }
@@ -83,16 +92,30 @@ namespace FuckTheseFX.Source.GlassCulling
             if (Parent == null) foreach (var peer in Peers)
             {
                 // Destruction is not culling evidence. Release if the association loses a peer.
-                if (!peer || !peer.transform.IsChildOf(Scope)) { Retire(); return 0; }
+                if (!peer || (validate && !peer.transform.IsChildOf(Scope))) { Retire(); return 0; }
                 if (peer.gameObject.activeInHierarchy && peer.enabled && !peer.forceRenderingOff) hidden = false;
             }
+            // Native setters may repeat an unchanged state. Only a transition needs pane work;
+            // the infrequent maintenance path explicitly validates external/structural changes.
+            if (!validate && hasVisibility && hidden == lastHidden) return forcedCount;
+            hasVisibility = true; lastHidden = hidden;
+            var peerBounds = new Bounds();
+            if (hidden && Parent == null && !TryBounds(Peers, Scope, out peerBounds)) { Retire(); return 0; }
             int count = 0;
             for (int i = 0; i < Glass.Length; i++)
             {
                 var glass = Glass[i];
                 if (!glass) continue;
-                bool suppress = hidden && glass.transform.IsChildOf(Scope) && glass.gameObject.activeInHierarchy &&
-                    (Parent == null ? Encloses(Peers, glass) : Parent.Contains(glass));
+                bool suppress = hidden && glass.transform.IsChildOf(Scope) && glass.gameObject.activeInHierarchy;
+                if (suppress)
+                {
+                    if (Parent != null) suppress = Parent.Contains(glass);
+                    else
+                    {
+                        var glassBounds = glass.bounds;
+                        suppress = peerBounds.Contains(glassBounds.min) && peerBounds.Contains(glassBounds.max);
+                    }
+                }
                 if (suppress)
                 {
                     // Do not claim a flag already held by the game or another feature.
@@ -101,6 +124,7 @@ namespace FuckTheseFX.Source.GlassCulling
                 }
                 else Release(i);
             }
+            forcedCount = count;
             return count;
         }
 
@@ -110,7 +134,7 @@ namespace FuckTheseFX.Source.GlassCulling
             forced[index] = false;
         }
 
-        internal void Restore() { for (int i = 0; i < Glass.Length; i++) Release(i); }
+        internal void Restore() { for (int i = 0; i < Glass.Length; i++) Release(i); forcedCount = 0; hasVisibility = false; }
         internal void Retire() { Restore(); retired = true; }
 
         internal static bool SameOwners(HashSet<PerfectCullingBakeGroup> a, HashSet<PerfectCullingBakeGroup> b) =>

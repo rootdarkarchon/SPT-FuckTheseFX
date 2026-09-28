@@ -49,7 +49,7 @@ namespace FuckTheseFX.Source.GlassCulling
                     foreach (var group in Groups) foreach (var scope in group.Scopes) scope.Retire();
                     return;
                 }
-                if (validateBounds)
+                if (validateBounds && Anchors.Count != 0)
                 {
                     var box = Renderer.bounds;
                     bool moved = (box.center - Bounds.center).sqrMagnitude > .000001f ||
@@ -73,6 +73,7 @@ namespace FuckTheseFX.Source.GlassCulling
         internal int ScopeCount { get; private set; }
         internal int GroupMemberVisits { get; private set; }
         internal int IndexedGroupCount => groupAvailability.Count;
+        internal int ReferenceCount => audit.Count;
         internal IEnumerable<PerfectCullingBakeGroup> Groups => watchedGroups;
 
         private static bool IsAvailable(Renderer renderer) => renderer && renderer.gameObject.activeInHierarchy &&
@@ -245,9 +246,15 @@ namespace FuckTheseFX.Source.GlassCulling
             int count = System.Math.Min(128, audit.Count);
             while (count-- > 0)
             {
-                if (cursor >= audit.Count) cursor = 0;
-                audit[cursor++].Read();
+                AuditOne();
             }
+        }
+
+        internal void AuditOne()
+        {
+            if (audit.Count == 0) return;
+            if (cursor >= audit.Count) cursor = 0;
+            audit[cursor++].Read();
         }
     }
 }

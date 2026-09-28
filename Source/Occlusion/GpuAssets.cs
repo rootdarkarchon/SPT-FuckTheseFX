@@ -23,7 +23,7 @@ namespace FuckTheseFX.Source.Occlusion
                 Composite = Bundle.LoadAsset<Shader>("Assets/XeGTAO/Composite.shader");
                 Ambient = Bundle.LoadAsset<Shader>("Assets/CustomAmbient.shader");
                 ColorBleed = Bundle.LoadAsset<Shader>("Assets/XeGTAO/ColorBleed.shader");
-                if (Compute == null || Composite == null || !Composite.isSupported || Composite.passCount < 10)
+                if (Compute == null || Composite == null || !Composite.isSupported || Composite.passCount < 11)
                     throw new InvalidOperationException("Unsupported or mismatched XeGTAO bundle.");
                 Quad = new Mesh { name = "FTFX Occlusion Quad", hideFlags = HideFlags.HideAndDontSave };
                 Quad.vertices = new[] { new Vector3(0,0,0), new Vector3(0,1,0), new Vector3(1,1,0), new Vector3(1,0,0) };
