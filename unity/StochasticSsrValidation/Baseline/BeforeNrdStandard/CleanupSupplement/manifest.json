@@ -1,0 +1,14 @@
+{
+  "Test-SsrProfilerInterop.ps1": "3e155bc0e3f247ba0b27bf2d0597c76cbe85f2e159a187074e7f36bc19117877",
+  "native/NRD/Bridge.cpp": "0909fe1948a7cb03fb4252044d41e8258758252508cbb4c04be2d2751368d414",
+  "Source/StochasticSSR/NrdSpecularBackend.cs": "3845ba0d22d1a210e27737874324b9e4bcbf2547c9f29f71cb86028076fc6368",
+  "Source/StochasticSSR/SsrPipeline.cs": "7174d900390dfe6d6439f6e5ee42ecd335a66b60da275bb675f23cc1a39142e8",
+  "Source/StochasticSSR/SsrRasterState.cs": "294c16ac84594f6fd0b85a87fb7abfb3b1b1389560f0f717e9aaa1f29563014f",
+  "Source/StochasticSSR/SsrReflectionPipeline.cs": "5c23b474ce6a5c8e839b48d780190d4cad4431877d92b50ad0e01d7cba76a7c3",
+  "unity/StochasticSSR/HiZ.compute": "ba574fccc05b421f8e5ff6ab79d89138b4a3d721ee1ab85d61564d4836c00a57",
+  "unity/StochasticSSR/RasterState.hlsl": "c9a6daa09884df57117d2694b167049b76b0a84f49de4e6ef38378be79601c98",
+  "unity/StochasticSSR/Reflection.shader": "215e4b32bdb0998520b653cc8f49b4a8490847a17900e7cf3676ffe53e121ffc",
+  "unity/StochasticSsrValidation/JitterFixture.shader": "121a5376adcf175d1ed70ee86c57c68698d1590168dcb83f84f3d923efedb4b0",
+  "unity/StochasticSsrValidation/TodAudit.shader": "98cdaacaa40c83146b5af90eaa5b3ecd79f868c9026db33cd6f159308d1edbef",
+  "unity/StochasticSsrValidation/WaterCaptureFixture.shader": "356bdddc2e21d84179c382140fe48887167c992d2e3a780457e06a7262a7b80e"
+}

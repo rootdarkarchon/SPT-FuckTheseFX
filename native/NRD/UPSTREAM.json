@@ -1,0 +1,10 @@
+{
+  "ShaderMake": "9c978c37ccd1c00b8669d633735823fe25ee3647",
+  "version": "4.18.0",
+  "MathLib": "v11",
+  "path": "DXBC only / D3D11 / unmodified upstream shaders",
+  "repository": "https://github.com/NVIDIA-RTX/NRD",
+  "roughnessEncoding": "LINEAR",
+  "normalEncoding": "R10_G10_B10_A2_UNORM",
+  "revision": "c3d8999f8b30dca3b1c07d9aeab235b29d9b1a28"
+}

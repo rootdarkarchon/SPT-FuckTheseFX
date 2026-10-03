@@ -3,9 +3,9 @@
     <TargetFramework>netstandard2.1</TargetFramework>
     <RootNamespace>FuckTheseFX</RootNamespace>
     <AssemblyName>FuckTheseFX</AssemblyName>
-    <Version>1.6.0</Version>
-    <AssemblyVersion>1.6.0</AssemblyVersion>
-    <FileVersion>1.6.0</FileVersion>
+    <Version>1.7.0</Version>
+    <AssemblyVersion>1.7.0</AssemblyVersion>
+    <FileVersion>1.7.0</FileVersion>
     <Authors>rootdarkarchon</Authors>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
@@ -17,6 +17,9 @@
     <Compile Remove="unity\**\*.cs" />
     <None Update="Assets\distantshadows" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Assets\stochasticssr" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Assets\nrdssr" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="obj\NRD\bridge\Release\FTFXNrd.dll" Link="FTFXNrd.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('obj\NRD\bridge\Release\FTFXNrd.dll')" />
+    <None Update="Assets\water" CopyToOutputDirectory="PreserveNewest" />
     <Reference Include="Unity.Postprocessing.Runtime"><HintPath>$(SptInstallPath)\EscapeFromTarkov_Data\Managed\Unity.Postprocessing.Runtime.dll</HintPath></Reference>
     <None Update="Assets\occlusion" CopyToOutputDirectory="PreserveNewest" />
     <None Update="unity\Assets\XeGTAO\Upstream\LICENSE" Link="Licenses\XeGTAO.txt" CopyToOutputDirectory="PreserveNewest" />

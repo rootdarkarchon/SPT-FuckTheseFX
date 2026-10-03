@@ -8,6 +8,7 @@ try {
     foreach ($contract in @(
         @('EFT.BaseLocalGame`1', 'get_PlayerOwner', 'TPlayerOwner'),
         @('EFT.PlayerOwner', 'get_Player', 'EFT.Player'),
+        @('EFT.GameWorld', 'get_LocationId', 'System.String'),
         @('EFT.Player', 'get_GameWorld', 'EFT.GameWorld')
     )) {
         $type = $game.MainModule.Types | Where-Object FullName -eq $contract[0]
@@ -57,5 +58,5 @@ try {
         $toggle = $group.Methods | Where-Object Name -eq 'Toggle'
         if (-not ($toggle.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.FieldReference] -and $_.Operand.Name -eq $name })) { throw "Independent native path changed: $name" }
     }
-    Write-Output 'Glass contracts verified: native player-owner readiness before loot setup, raid gate/singletons, runtime renderer lists, enabled/force-off routes, Init rebuild, baked LOD route and separate light/analytic paths.'
+    Write-Output 'Glass contracts verified: native player-owner readiness before loot setup, world location ID, raid gate/singletons, runtime renderer lists, enabled/force-off routes, Init rebuild, baked LOD route and separate light/analytic paths.'
 } finally { $game.Dispose() }

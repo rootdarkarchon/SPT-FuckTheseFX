@@ -31,7 +31,7 @@ namespace EFT
         public GameStatus Status { get; set; }
         public EGameType GameType { get; set; }
     }
-    public class GameWorld : MonoBehaviour { }
+    public class GameWorld : MonoBehaviour { public string LocationId { get; set; } = "tarkovstreets"; }
     public class Player : MonoBehaviour { public GameWorld GameWorld { get; set; } }
     public class EftGamePlayerOwner : MonoBehaviour { public Player Player { get; set; } }
     public class BaseLocalGame<T> : AbstractGame
@@ -562,6 +562,17 @@ public static class GlassCullingValidation
             var family = ((List<GlassCullingFamily>)matches.GetValue(feature))[0];
             game.Status = GameStatus.Started; feature.Update();
             Check(ReferenceEquals(family, ((List<GlassCullingFamily>)matches.GetValue(feature))[0]), "Later Started status does not discard loading-screen associations");
+            foreach (var location in new[] { "bigmap", "woods", "factory4_day", "factory4_night", "interchange", "shoreline", "rezervbase", "laboratory", "lighthouse", "sandbox", "sandbox_high", "hideout", "", null })
+            {
+                world.LocationId = location; feature.Update(); Discover(feature);
+                Check(!glass.forceRenderingOff, "Non-Streets or unknown location restores glass: " + location);
+                Check(((List<GlassCullingFamily>)matches.GetValue(feature)).Count == 0,
+                    "Non-Streets or unknown location prevents associations: " + location);
+                group.Toggle(true); group.Toggle(false);
+                Check(!glass.forceRenderingOff, "Native culling hooks stay inactive outside Streets: " + location);
+            }
+            world.LocationId = "TarkovStreets"; feature.Update(); Discover(feature);
+            Check(glass.forceRenderingOff, "Streets location comparison ignores casing and rediscovers after a location change");
             game.Status = GameStatus.Stopping; feature.Update();
             Check(!glass.forceRenderingOff, "Raid stop restores startup-created associations");
             game.PlayerOwner = null; game.Status = GameStatus.Running; feature.Update(); Discover(feature);

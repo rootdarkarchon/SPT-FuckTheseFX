@@ -4,5 +4,6 @@ namespace FuckTheseFX
     internal sealed class ConfigurationManagerAttributes
     {
         public bool? IsAdvanced;
+        public bool? Browsable;
     }
 }

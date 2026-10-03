@@ -8,6 +8,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Experimental.Rendering;
 using FuckTheseFX.Source.Occlusion;
+using FuckTheseFX.Source.StochasticSSR;
 
 public static partial class OcclusionValidation
 {
@@ -42,6 +43,8 @@ public static partial class OcclusionValidation
   var theirs=new HarmonyMethod(typeof(OcclusionValidation),nameof(ResearchDrawFixture));
   try
   {
+   AmbientSurfaceCapture.Requested=()=>true;AmbientSurfaceCapture.IsMainCamera=c=>c==camera;
+   material.EnableKeyword("FTFX_SURFACE_CAPTURE");
    camera.AddCommandBuffer(CameraEvent.AfterLighting,camSettings.CbAmbient);
    for(int order=0;order<2;order++)
    {
@@ -51,17 +54,23 @@ public static partial class OcclusionValidation
     native.InitAmbientBuffer(camSettings,camera);camera.Render();
     var captured=Read(output);Require(captured.r==1 && captured.g==0 && captured.b==0,"Actual native fragment was not captured through research wrapper: "+captured);
     Require(researchDraws==1,"Research draw skipped/duplicated");Require(Shader.GetGlobalFloat("_FTFX_CA_DebugAvailable")==0,"Diagnostic UAV availability leaked");
+    var surfaceCapture=AmbientSurfaceCapture.Get(camera,64,64);
+    Require(surfaceCapture!=null && Read(surfaceCapture).a==1,"Pre-ambient surface capture did not run through actual draw hook");
+    Require(Shader.GetGlobalFloat("_FTFX_CA_SurfaceCaptureEnabled")==0,"Surface capture availability leaked past ambient draw");
     settings.View.Value=OcclusionView.Normal;Clear(output,Color.cyan);native.InitAmbientBuffer(camSettings,camera);camera.Render();
     var disabled=Read(output);Require(disabled.r==0 && disabled.g==1 && disabled.b==1,"Normal view still wrote debug UAV");
+    native.InitAmbientBuffer(camSettings,camera);camera.Render();
+    Require(Read(surfaceCapture).a==1 && Shader.GetGlobalFloat("_FTFX_CA_SurfaceCaptureEnabled")==0,"Surface capture must work and unbind independently of reflection/debug captures");
     owner.UnpatchSelf();research.UnpatchSelf();
    }
   }
   finally
   {
    owner.UnpatchSelf();research.UnpatchSelf();instanceField.SetValue(null,null);bridge.Dispose();
+   AmbientSurfaceCapture.Dispose();
    camera.RemoveCommandBuffer(CameraEvent.AfterLighting,camSettings.CbAmbient);camSettings.CbAmbient.Dispose();
    GpuAssets.Release(ref output);UnityEngine.Object.DestroyImmediate(material);UnityEngine.Object.DestroyImmediate(mesh);DestroyScene(camera,target,geometry);
   }
-  results.Add("PASS: actual ambient draw UAV capture, research wrapper preserved in both patch installation orders, Normal-view bypass and cleanup.");
+  results.Add("PASS: actual ambient draw UAV capture, simultaneous reflection/debug UAVs, research wrapper preserved in both patch installation orders, independent Normal-view bypass and cleanup.");
  }
 }

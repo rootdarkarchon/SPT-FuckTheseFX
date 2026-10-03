@@ -5,6 +5,7 @@ Shader "Hidden/FTFX/StochasticSSR/Support"
         ZTest Always ZWrite Off Cull Off
         HLSLINCLUDE
         #pragma target 5.0
+#include "RasterState.hlsl"
         Texture2D<float4> _MainTex;
         float4 _Size;
         struct V { float4 position:SV_POSITION;float2 uv:TEXCOORD0; };
@@ -38,22 +39,8 @@ Shader "Hidden/FTFX/StochasticSSR/Support"
                 float raw=_DepthOptions.w>.5?_FTFXSSR_RawDepth.Load(int3((int2)pixel,0)):_CameraDepthTexture.Load(int3((int2)pixel,0));
                 if(_DepthOptions.z>.5?raw<.0000001:raw>.9999999)return _DepthOptions.y;
                 float2 uv=pixel/_Size.xy;
-                float4 h=mul(_InverseProjection,float4(uv*2-1,raw,1));
+                float4 h=mul(SsrRasterMatrix(_InverseProjection,4),float4(uv*2-1,raw,1));
                 return clamp(-h.z/h.w,_DepthOptions.x,_DepthOptions.y);
-            }
-            ENDHLSL
-        }
-        Pass
-        {
-            HLSLPROGRAM
-            #pragma vertex Vert
-            #pragma fragment MotionFrag
-            Texture2D<float2> _CameraMotionVectorsTexture;
-            float4 _SampleOffset;
-            float4 MotionFrag(V i):SV_Target
-            {
-                int2 pixel=min((int2)((floor(i.position.xy)+_SampleOffset.xy)*_Size.xy/_Size.zw),(int2)_Size.xy-1);
-                return float4(_CameraMotionVectorsTexture.Load(int3(pixel,0)),0,0);
             }
             ENDHLSL
         }

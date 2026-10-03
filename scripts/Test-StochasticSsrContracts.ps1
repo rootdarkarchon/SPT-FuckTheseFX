@@ -24,9 +24,27 @@ try {
     $pipeline=$types | Where-Object Name -eq 'SsrPipeline'
     if($pipeline.Methods | Where-Object Name -in @('CaptureDiagnostic','SnapshotNativeTrace','NativeCompose','Resolve','Filter','Finish','BuildReflectionMips')) { throw 'Research-only paths leaked into release pipeline' }
     $markers=$types | Where-Object { $_.Namespace -eq 'FuckTheseFX.Source.StochasticSSR' -and $_.Name -eq 'SsrGpuSample' }
+    if($types | Where-Object Name -in @('FidelityDenoiser','AmdReflectionDenoiser','ReflectionDenoiser','ReflectionDirection','ReflectionDepthGapFill')) { throw 'Retired native-signal denoiser remains in release' }
+    if($types | Where-Object Namespace -match 'CleanupBaseline|PerformanceBaseline|TraceOptimizationBaseline|ContinuationOptimizationBaseline|HistoryCopyBaseline|HistoryOwnershipBaseline|PreNrdStandard') {throw 'Validation-only baseline leaked into release'}
+    $options=$types | Where-Object { $_.Namespace -eq 'FuckTheseFX.Source.StochasticSSR' -and $_.Name -eq 'Options' }
+    if(-not ($options.Fields | Where-Object Name -eq 'GlobalContinuedSky')) {throw 'Global continued-sky runtime option missing'}
+    if($options.Fields | Where-Object Name -in @('DdaForeground','SimpleMirrorTraversal')) {throw 'Removed traversal experiment remains in runtime options'}
+    if($options.Fields | Where-Object Name -match 'Amd|Denoiser|Spatial|HitAware|GapFill|ForegroundSky|ForegroundAdjacent|ForegroundPermissiveness|Shallow|VarianceStrength|Direction|MatchCameraAspect|ConstrainHitToCell|HitNormalConfidenceOnly|RelaxOccluderReturn|SkyAfterContinuation') {throw 'Retired option fields remain'}
+    $confidence=$types | Where-Object Name -eq 'SsrReflectionPipeline'
+    if($confidence.Fields | Where-Object Name -in @('HistoryRecord','spareRecord')) {throw 'Unpacked source-classification history remains in release'}
+    if($confidence.Fields | Where-Object Name -match '^History|^Temporal|Anchor|spare|DepthGapFilled|exactResidual') {throw 'Removed custom temporal storage remains'}
+    if(-not ($confidence.Methods | Where-Object Name -eq 'RequireNrd')) {throw 'Mandatory NRD backend gate missing'}
+    if($types | Where-Object Name -in @('ConfidenceSsrPipeline','AmbientReflectionCapture')) {throw 'Declined implementation remains in production'}
+    if($options.Fields | Where-Object Name -match 'CoverageTemporal|CoverageFilter|CoverageFull|CoverageEnd|WaterNormal|WaterTrace|NormalStart|NormalEnd|NormalRadius|UseCaptured|NrdSpecular') {throw 'Removed settings/options remain'}
+    if($confidence.Fields | Where-Object Name -match 'counter|TemporalEvents|Estimate|Filtered|SourceContext|ReuseDiagnostic') {throw 'Retired runtime state remains'}
+    if($confidence.Methods | Where-Object Name -match 'Counter|TemporalEvent') {throw 'Continuous diagnostic work remains'}
+    if(-not ($types | Where-Object Name -eq 'SsrReflectionPipeline')) { throw 'Reflection pipeline missing' }
+    if($types | Where-Object { $_.Name -eq 'ReflectionView' -and ($_.Fields | Where-Object Name -eq 'EnvironmentFallback') }) {throw 'Black-only retired debug view remains'}
+    $nrd=$types | Where-Object Name -eq 'NrdSpecularBackend'
+    if($nrd.Methods | Where-Object Name -in @('DiagnosticTexture','FTFX_NrdTexture')) {throw 'Retired native diagnostic accessor remains'}
     if($markers.Methods | Where-Object Name -in @('Discover','Snapshot')) { throw 'Research profiler integration leaked into release' }
     $hooks=$types | Where-Object Name -eq 'SsrHooks'
-    foreach($name in @('Before','After','TracePass','Suspend','Prune')) { if(-not ($hooks.Methods | Where-Object Name -eq $name)) {throw "SSR hook missing: $name"} }
+    foreach($name in @('Before','After','Suspend','Prune')) { if(-not ($hooks.Methods | Where-Object Name -eq $name)) {throw "SSR hook missing: $name"} }
     foreach($name in @('Update','OnDisable','OnEnable','OnDestroy')) {
         $method=$plugin.Methods | Where-Object Name -eq $name
         if(-not ($method.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.DeclaringType.Name -eq 'StochasticSsrIntegration' })) { throw "SSR lifecycle missing: $name" }
@@ -34,15 +52,39 @@ try {
     if($assembly.MainModule.AssemblyReferences | Where-Object Name -match 'SsrPrototype|SSRSix') { throw 'Release SSR must not depend on another plugin assembly' }
 } finally { $assembly.Dispose();$resolver.Dispose() }
 if((Get-FileHash (Join-Path $SptInstallPath 'EscapeFromTarkov_Data/Managed/Unity.Postprocessing.Runtime.dll')).Hash -ne 'B8055ECC0C1A6BA0A04427066A3DEF8C87DA90C1EAC071FA72D8193521441548') { throw 'Native SSR ABI changed' }
-$project=Join-Path $repo 'obj/StochasticSsrValidation'
+$project=Join-Path $repo 'obj/NrdStandardValidation'
 $result=Get-Item (Join-Path $project 'validation.txt')
 foreach($source in Get-ChildItem (Join-Path $repo 'Source/StochasticSSR') -Filter '*.cs') {
     $tested=Join-Path $project ('Assets/Editor/'+$source.Name)
     if((Get-FileHash $source.FullName).Hash -ne (Get-FileHash $tested).Hash -or $source.LastWriteTimeUtc -gt $result.LastWriteTimeUtc) {throw "Untested release SSR source: $($source.Name)"}
 }
-foreach($source in @(Get-ChildItem (Join-Path $repo 'unity/StochasticSSR/AMD') -File) + @(Get-Item (Join-Path $repo 'unity/StochasticSSR/HiZ.compute'),(Join-Path $repo 'unity/StochasticSSR/Support.shader'),(Join-Path $repo 'unity/StochasticSSR/FidelityDenoiser.compute'))) {
+foreach($source in @(Get-ChildItem (Join-Path $repo 'unity/StochasticSSR/AMD') -File) + @(Get-Item (Join-Path $repo 'unity/StochasticSSR/HiZ.compute'),(Join-Path $repo 'unity/StochasticSSR/Support.shader'),(Join-Path $repo 'unity/StochasticSSR/Reflection.shader'),(Join-Path $repo 'unity/StochasticSSR/TodReflection.hlsl'),(Join-Path $repo 'unity/StochasticSSR/WaterCapture.shader'),(Join-Path $repo 'unity/StochasticSSR/ReuseBrdf.hlsl'),(Join-Path $repo 'unity/StochasticSSR/RasterState.hlsl'),(Join-Path $repo 'unity/StochasticSSR/NrdInputs.shader'))) {
     $folder=if($source.Directory.Name -eq 'AMD') {'Assets/AMD'}else{'Assets'}
     if((Get-FileHash $source.FullName).Hash -ne (Get-FileHash (Join-Path $project "$folder/$($source.Name)")).Hash -or $source.LastWriteTimeUtc -gt $result.LastWriteTimeUtc) {throw "Untested release SSR asset: $($source.Name)"}
 }
 if((Get-FileHash (Join-Path $repo 'Assets/stochasticssr')).Hash -ne (Get-FileHash (Join-Path $project 'Output/stochasticssr')).Hash) { throw 'Release SSR bundle differs from validated bundle' }
+$reflectionSource=Get-Content (Join-Path $repo 'unity/StochasticSSR/Reflection.shader') -Raw
+if($reflectionSource -match '_History|TemporalDisplay|CoverageDisplay|ExactSubtract|_CapturedReflection|_WaterNormalsEnabled') {throw 'Declined shader paths remain'}
+$passes=@([regex]::Matches($reflectionSource,'#pragma fragment (\w+)') | ForEach-Object { $_.Groups[1].Value })
+if(($passes -join ',') -ne 'Resolve,Compose,ReplayInput,ComposeNormal') {throw 'Compacted reflection pass mapping changed'}
+$traceSource=Get-Content (Join-Path $repo 'unity/StochasticSSR/HiZ.compute') -Raw
+if($traceSource -match 'FTFX_DDA_FOREGROUND|foregroundDda|SimpleMirror|FTFX_SIMPLE_MIRROR|PrepareWaterNormals|_WaterNormal|_NormalFilter') {throw 'Removed traversal experiment remains in the release shader'}
+if($traceSource -notmatch '_ZeroSmoothnessProbe!=0 && smoothness==0' -or $traceSource.IndexOf('_ZeroSmoothnessProbe!=0 && smoothness==0') -ge $traceSource.IndexOf('direction=SampleReflectionVector')) {throw 'Experimental zero-smoothness receivers must bypass GGX before sampling'}
+if($reflectionSource -notmatch 'if\(ZeroSmoothnessProbeReceiver\(pixel\)\)return ZeroSmoothnessProbeScene\(pixel,scene\);') {throw 'Experimental probe replacement must bypass SSR reconstruction'}
+if($traceSource -notmatch '_GlobalContinuedSky==0 && !WaterPosition\(pixel,waterPoint\)') {throw 'Continued-sky receiver scope gate missing'}
+$pipelineSource=Get-Content (Join-Path $repo 'Source/StochasticSSR/SsrPipeline.cs') -Raw
+if($pipelineSource -notmatch '\(water!=null \|\| o.GlobalContinuedSky\) && continuedSkyKernel>=0') {throw 'Global continued sky must run without native water capture'}
+if($traceSource -notmatch '#pragma multi_compile_local _ FTFX_TRACE_DIAGNOSTICS' -or $traceSource -match '_DirectionMode|_HitNormalConfidenceOnly|_ConstrainHitToCell') {throw 'Diagnostic variant or fixed tracer behavior mismatch'}
+if($traceSource -notmatch '#pragma multi_compile_local _ FTFX_REJECTION_DIAGNOSTICS' -or $traceSource -match 'OctDecode') {throw 'Optional rejection diagnostic variant or shader cleanup mismatch'}
+$rasterSource=Get-Content (Join-Path $repo 'Source/StochasticSSR/SsrRasterState.cs') -Raw
+$rasterShader=Get-Content (Join-Path $repo 'unity/StochasticSSR/RasterState.hlsl') -Raw
+if($rasterSource -notmatch 'ComputeBuffer\(16,16\)' -or $rasterSource -match 'Store\((16|20|24),' -or $rasterShader -match 'SsrRasterHistory|SsrHistoryUV') {throw 'Unused temporal raster uploads/helpers remain'}
+if($reflectionSource -match '\b_Options\b|view==17') {throw 'Retired reflection parameters/debug path remain'}
+$retiredFixtureReferences=Get-ChildItem (Join-Path $repo 'unity/StochasticSsrValidation') -Filter '*.cs' | Where-Object { $_.Name -ne 'NrdStandardValidation.cs' -and (Get-Content $_.FullName -Raw) -match 'ConfidenceSsrPipeline|AmbientReflectionCapture|partial class StochasticSsrValidation' }
+if($retiredFixtureReferences -or (Test-Path (Join-Path $repo 'scripts/Test-SsrProfilerInterop.ps1'))) {throw 'Stale validation wiring remains outside archive'}
+if(Get-ChildItem (Join-Path $repo 'unity/StochasticSSR') -Recurse -File | Where-Object Name -match 'Denoiser|HitReuse|ffx_denoiser') {throw 'Retired production shader dependencies remain'}
 Write-Output 'Verified SSR compatibility, lifecycle, release-only code, pinned ABI and validated source/bundle hashes.'
+
+if((Get-FileHash (Join-Path $repo 'Assets/nrdssr')).Hash -ne (Get-FileHash (Join-Path $project 'Output/nrdssr')).Hash) {throw 'NRD bundle differs from validated bundle'}
+if((Get-FileHash (Join-Path $repo 'obj/NRD/bridge/Release/FTFXNrd.dll')).Hash -ne (Get-FileHash (Join-Path $project 'Native/FTFXNrd.dll')).Hash) {throw 'Native NRD DLL differs from tested DLL'}
+if((Get-FileHash (Join-Path $repo 'unity/StochasticSsrValidation/NrdStandardValidation.cs')).Hash -ne (Get-FileHash (Join-Path $project 'Assets/Editor/NrdStandardValidation.cs')).Hash) {throw 'Untested NRD removal validation'}

@@ -19,6 +19,7 @@ namespace FuckTheseFX.Source.StochasticSSR
         private Texture2D noise;
         private SsrHooks hooks;
         private Harmony harmony;
+        private WaterReflectionCapture waterCapture;
         private bool previousEnabled, suspended;
         private int frames;
         internal StochasticSsrIntegration(string path, SsrSettings settings) { this.path=path;this.settings=settings; }
@@ -42,26 +43,32 @@ namespace FuckTheseFX.Source.StochasticSSR
                 if(bundle==null)throw new InvalidOperationException("Missing Assets/stochasticssr bundle");
                 var compute=bundle.LoadAsset<ComputeShader>("Assets/HiZ.compute");
                 var blend=bundle.LoadAsset<Shader>("Assets/Support.shader");
-                var amd=bundle.LoadAsset<ComputeShader>("Assets/FidelityDenoiser.compute");
+                var reflection=bundle.LoadAsset<Shader>("Assets/Reflection.shader");
                 var bytes=bundle.LoadAsset<TextAsset>("Assets/AMD/BlueNoise.bytes");
-                if(compute==null || blend==null || !blend.isSupported || amd==null || bytes==null || bytes.bytes.Length!=32768)
+                if(compute==null || blend==null || !blend.isSupported || reflection==null || !reflection.isSupported || bytes==null || bytes.bytes.Length!=32768)
                     throw new InvalidOperationException("Stochastic SSR shader assets unavailable");
                 noise=new Texture2D(128,128,TextureFormat.RG16,false,true) {filterMode=FilterMode.Point,wrapMode=TextureWrapMode.Repeat};
                 noise.LoadRawTextureData(bytes.bytes);noise.Apply(false,true);
-                hooks=new SsrHooks(renderer,compute,blend,amd,noise) {
+                hooks=new SsrHooks(renderer,compute,blend,reflection,noise) {
                     Settings=()=>suspended?new Options {Mode=SsrMode.Native}:settings.Read(),
                     IsMainCamera=c=>CameraManager.Instance!=null && ReferenceEquals(CameraManager.Instance.Camera,c),
                     Error=s=>Plugin.MyLog.LogError(s)
                 };
                 SsrHooks.Active=hooks;
+                try {
+                    waterCapture=new WaterReflectionCapture(bundle.LoadAsset<Shader>("Assets/WaterCapture.shader")) {
+                        Requested=()=>!suspended && settings.NeedsWaterCapture,
+                        IsMainCamera=hooks.IsMainCamera
+                    };
+                } catch(Exception error) {Plugin.MyLog.LogWarning("Water shoreline capture unavailable; ordinary SSSR retained. "+error);}
+                AmbientSurfaceCapture.Requested=()=>!suspended && settings.Enabled.Value && settings.SurfaceColourInfluence.Value>0;
+                AmbientSurfaceCapture.IsMainCamera=hooks.IsMainCamera;
                 harmony=new Harmony(Plugin.Guid+".stochasticssr");
-                var blit=AccessTools.Method(typeof(RuntimeUtilities),"BlitFullscreenTriangle",new[]{typeof(CommandBuffer),typeof(RenderTargetIdentifier),typeof(RenderTargetIdentifier),typeof(PropertySheet),typeof(int),typeof(bool),typeof(Rect?)});
                 var render=AccessTools.Method(renderer,"Render");
-                if(blit==null || render==null)throw new MissingMethodException("Native SSR render contract missing");
-                harmony.Patch(blit,prefix:new HarmonyMethod(typeof(SsrHooks),nameof(SsrHooks.TracePass)));
+                if(render==null)throw new MissingMethodException("Native SSR render contract missing");
                 harmony.Patch(render,prefix:new HarmonyMethod(typeof(SsrHooks),nameof(SsrHooks.Before)),finalizer:new HarmonyMethod(typeof(SsrHooks),nameof(SsrHooks.After)));
                 previousEnabled=settings.Enabled.Value;
-                Plugin.MyLog.LogInfo("Stochastic SSR ready. Native reconstruction by default; optics and disabled SSR retain native behavior.");
+                Plugin.MyLog.LogInfo("Stochastic SSR ready: NRD-denoised reflections; optics and disabled SSR retain native behavior.");
             }
             catch { Dispose();throw; }
         }
@@ -75,6 +82,8 @@ namespace FuckTheseFX.Source.StochasticSSR
         {
             if(hooks==null)return;
             if(HasConflict()){Dispose();return;}
+            AmbientSurfaceCapture.Prune();
+            if(frames%300==0)waterCapture?.Prune();
             if(previousEnabled!=settings.Enabled.Value){hooks.Suspend();previousEnabled=settings.Enabled.Value;}
             if(++frames%300==0)hooks.Prune();
         }
@@ -82,6 +91,8 @@ namespace FuckTheseFX.Source.StochasticSSR
         internal void Resume() { suspended=false; }
         public void Dispose()
         {
+            AmbientSurfaceCapture.Dispose();
+            waterCapture?.Dispose();waterCapture=null;
             harmony?.UnpatchSelf();harmony=null;hooks?.Dispose();hooks=null;
             if(noise!=null)UnityEngine.Object.Destroy(noise);noise=null;
             if(bundle!=null)bundle.Unload(true);bundle=null;

@@ -1,4 +1,8 @@
 bin/
 obj/
 .vs/
+native/NRD/vendor/
+research-archive/
+__pycache__/
+*.py[cod]
 

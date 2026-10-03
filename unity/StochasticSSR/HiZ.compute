@@ -1,85 +1,73 @@
 #pragma kernel ReduceDepth
 #pragma kernel Trace
-#pragma kernel ResetRays
-#pragma kernel ClassifyRays
-#pragma kernel PrepareRayDispatch
-#pragma kernel FinishNativeDenoise
-#pragma kernel ClassifyAdaptive
-#pragma kernel ReconstructAdaptive
+#pragma kernel FinalizeContinuedSky
 #pragma target 5.0
-
+#pragma multi_compile_local _ FTFX_LATE_RASTER
+#pragma multi_compile_local _ FTFX_TRACE_DIAGNOSTICS
+#pragma multi_compile_local _ FTFX_REJECTION_DIAGNOSTICS
+#pragma multi_compile_local _ FTFX_BYPASS_HIT_NORMAL
+#pragma multi_compile_local _ FTFX_TRAVERSAL_DIAGNOSTICS
+#if defined(FTFX_TRACE_DIAGNOSTICS) && defined(FTFX_TRAVERSAL_DIAGNOSTICS)
+#define FTFX_WORK
+#endif
+#define FTFX_COMPUTE_RASTER
 Texture2D<float> _DepthPrevious;
 RWTexture2D<float> _DepthOutput;
 Texture2D<float> _HiZ0,_HiZ1,_HiZ2,_HiZ3,_HiZ4,_HiZ5,_HiZ6,_HiZ7,_HiZ8,_HiZ9,_HiZ10,_HiZ11,_HiZ12,_HiZ13;
 Texture2D<float4> _Normals,_Specular,_Scene;
-RWTexture2D<float4> _RadianceOutput,_HitOutput;
-RWTexture2D<float4> _PointOutput;
-RWTexture2D<float4> _NativeTestOutput,_SurfaceOutput;
-Texture2D<float4> _NativeResolved,_NativeTestInput,_FilteredInput;
-Texture2D<float4> _PointInput;
-float4 _SampleOffset;
-float _EdgePixels;
-int _Stochastic,_Frame,_NativeResponse,_NativeTraceContract;
-#include "AMD/Sampling.hlsl"
-
-
-
-RWTexture2D<float4> _DenoiseOutput;
+RWTexture2D<float4> _RadianceOutput,_HitOutput,_PointOutput,_RecordOutput;
+int _ZeroSmoothnessProbe;
+RWTexture2D<float4> _TraceInfo;
+#if defined(FTFX_REJECTION_DIAGNOSTICS)
+RWTexture2D<float4> _TraceStop;
+#endif
+#if defined(FTFX_TRACE_DIAGNOSTICS)
+RWTexture2D<float4> _DepthHit;
+#endif
 float4x4 _Projection,_InverseProjection,_WorldToView;
-float4 _Size; // camera xy, trace zw
-float4 _Trace; // max distance, thickness, minimum smoothness, iteration limit
-float4 _Clip; // near, far, highest mip, reversed Z
-
-
-
-
-int _CompactRays;
-int _WriteRawRadiance,_WriteGuides,_AdaptiveRays,_AdaptiveHistory;
-RWTexture2D<float> _AdaptiveMaskOutput;
-Texture2D<float> _AdaptiveMask,_AdaptiveVariance,_AdaptiveSamples;
-Texture2D<float4> _AdaptiveGuide,_AdaptivePoint,_AdaptiveMotion;
-float4x4 _AdaptivePreviousClip,_AdaptivePreviousToCurrent;
-RWStructuredBuffer<uint> _RayList,_RayCount,_RayDispatch;
-groupshared uint groupRayCount,groupRayBase;
-
-[numthreads(1,1,1)]
-void ResetRays(uint3 id:SV_DispatchThreadID)
-{ _RayCount[0]=0; }
-
-[numthreads(1,1,1)]
-void PrepareRayDispatch(uint3 id:SV_DispatchThreadID)
-{
-    uint groups=(_RayCount[0]+63)/64;
-    // D3D11 permits at most 65535 groups per dimension. One empty group is
-    // portable across drivers; every lane exits when the list is empty.
-    _RayDispatch[0]=max(1,min(groups,65535));
-    _RayDispatch[1]=max(1,(groups+65534)/65535);_RayDispatch[2]=1;
+float4 _Size,_Trace,_Clip;
+// _Trace.x is maximum camera-to-receiver distance; _Clip.w enables it.
+float _EdgePixels;
+int _Frame,_BypassHitNormal,_GlobalContinuedSky;
+float _ThicknessConfidenceFloor;
+float4 _Continuation; // total skipped cells, major-axis camera pixels, eye-depth gap, unused
+bool BypassHitNormal() {
+#if defined(FTFX_BYPASS_HIT_NORMAL)
+    return true;
+#else
+    return _BypassHitNormal!=0;
+#endif
 }
-
-[numthreads(8,8,1)]
-void FinishNativeDenoise(uint3 id:SV_DispatchThreadID)
-{
-    if(any(id.xy>=(uint2)_Size.zw))return;
-    float4 original=_NativeResolved.Load(int3(id.xy,0));
-    float smoothness=_PointInput.Load(int3(id.xy,0)).w;
-    float3 filtered=_FilteredInput.Load(int3(id.xy,0)).rgb;
-    int2 receiver=min((int2)((id.xy+.5)*_Size.xy/_Size.zw),(int2)_Size.xy-1);
-    bool excluded=smoothness<_Trace.z || all(_Normals.Load(int3(receiver,0))==0);
-    _RadianceOutput[id.xy]=float4(excluded?original.rgb:filtered,original.a);
+#include "AMD/Sampling.hlsl"
+#if defined(FTFX_TRACE_DIAGNOSTICS)
+#include "ReuseBrdf.hlsl"
+#endif
+#include "RasterState.hlsl"
+static float4x4 rasterProjection,rasterInverse,rasterView;
+void LoadRasterMatrices() {
+    rasterProjection=SsrRasterMatrix(_Projection,0);rasterInverse=SsrRasterMatrix(_InverseProjection,4);rasterView=SsrRasterMatrix(_WorldToView,12);
 }
-
+#if defined(FTFX_TRACE_DIAGNOSTICS)
+RWTexture2D<float4> _SampleOutput;
+#endif
+// Reuse the two diagnostic UAV slots: DX11 SM5 allows eight, and the
+// five ordinary outputs are rendering state. First rejection is optional;
+// work capture replaces ray/PDF and accepted-depth diagnostics for one frame.
+#if defined(FTFX_WORK)
+static uint workIterations,workContinuation,workDescents,workFine,workLevels,workRepeated,workEligible,workRejected;
+static int2 workLastFine;
+#endif
+void StoreTraversal(uint2 pixel) {
+#if defined(FTFX_WORK)
+    _SampleOutput[pixel]=float4(workIterations,workContinuation,workDescents,workEligible);
+    _DepthHit[pixel]=float4(workFine,workLevels,workRepeated,workRejected);
+#endif
+}
+Texture2D<float2> _WaterSurface;
 float3 Position(float2 uv,float depth)
 {
-    float4 h=mul(_InverseProjection,float4(uv*2-1,depth,1));
+    float4 h=mul(rasterInverse,float4(uv*2-1,depth,1));
     return h.xyz/h.w;
-}
-
-float3 OctDecode(float2 p)
-{
-    float3 n=float3(p,1-abs(p.x)-abs(p.y));
-    float2 s=float2(n.x>=0?1:-1,n.y>=0?1:-1);
-    if(n.z<0)n.xy=(1-abs(n.yx))*s;
-    return normalize(n);
 }
 
 [numthreads(8,8,1)]
@@ -111,188 +99,137 @@ float2 OctEncode(float3 n)
 }
 float2 Project(float3 p)
 {
-    float4 h=mul(_Projection,float4(p,1));return h.xy/h.w*.5+.5;
+    float4 h=mul(rasterProjection,float4(p,1));return h.xy/h.w*.5+.5;
 }
-float3 EyePosition(int2 pixel)
+float PlaneExit(float inside,float slope)
 {
-    float3 p=Position((pixel+.5)/_Size.xy,.5);
-    return p*(SceneDepth(pixel,0)/(-p.z));
+    return slope<0?max(0,-inside/slope):1e20;
 }
-float3 SurfaceNormal(int2 pixel,float3 center)
+// Miss-only record.z: 0 excluded, 1 invalid normal, 2 GGX hemisphere,
+// 3 short/degenerate ray, 4 self hit, 5 hit facing, 6 frustum exit,
+// 8 traversal budget, 9 unresolved depth, 10 completed/unconfirmed background.
+// Historical reason 7 was hit-distance rejection and is no longer emitted.
+// record.w retains the existing source classification contract.
+void TraceReason(uint2 pixel,float reason,float kind,float4 stats)
 {
-    // Select the closest depth neighbour in each axis to avoid crossing silhouettes.
-    int2 hi=(int2)_Size.xy-1;
-    float3 l=EyePosition(max(pixel-int2(1,0),0)),r=EyePosition(min(pixel+int2(1,0),hi));
-    float3 b=EyePosition(max(pixel-int2(0,1),0)),t=EyePosition(min(pixel+int2(0,1),hi));
-    float3 dx=abs(l.z-center.z)<abs(r.z-center.z)?center-l:r-center;
-    float3 dy=abs(b.z-center.z)<abs(t.z-center.z)?center-b:t-center;
-    return normalize(cross(dx,dy)+float3(0,0,1e-8));
+    _RecordOutput[pixel]=float4(0,0,reason,kind);
+    _TraceInfo[pixel]=stats;
+    StoreTraversal(pixel);
 }
-
-bool EligibleReceiver(float4 encodedNormal,float smoothness,float depth)
+// Diagnostics record attempted cost on failure, consumed cost on recovery.
+// Flags: 1 foreground depth, 2 facing, 4 recovered, 8 allowance exhausted,
+// 16 accepted low-facing confidence-only hit, 32 initial self-contact candidate,
+// 64 sky after completed bounded continuation (not recovered geometry).
+// The first rejection is retained. Bit 32 never changes trace acceptance.
+bool ContinueRejected(uint2 pixel,float2 uv,float rayDepth,float surface,float span,int cause,inout float4 stats)
 {
-    bool excluded=_NativeTraceContract!=0?smoothness<_Trace.z:smoothness<=_Trace.z;
-    return !excluded && depth>_Clip.x && depth<_Clip.y*.999 &&
-        !(_NativeTraceContract!=0 && all(encodedNormal==0));
+#if defined(FTFX_WORK)
+    workRejected++;
+#endif
+#if defined(FTFX_REJECTION_DIAGNOSTICS)
+    if(stats.w==0)_TraceStop[pixel]=float4(uv,rayDepth,surface);
+#endif
+    stats.xyz=float3(stats.x+1,stats.y+span,max(stats.z,max(0,rayDepth-surface)));
+    stats.w=(int)stats.w | cause;
+    bool allowed=_Continuation.x>0 && stats.x<=_Continuation.x && stats.y<=_Continuation.y && stats.z<=_Continuation.z;
+    if(!allowed && _Continuation.x>0)stats.w=(int)stats.w | 8;
+    return allowed;
 }
-
-void InitializeReceiver(uint2 id,int2 pixel,float smoothness,float depth,float3 normal,float3 p)
+// The water producer supplies surface depth, not the opaque bed underneath it.
+// Require agreement with the depth actually used by this trace.
+bool WaterPosition(int2 pixel,out float3 position)
 {
-    if(_WriteRawRadiance!=0)_RadianceOutput[id]=0;
-    _NativeTestOutput[id]=0;
-    if(_WriteGuides!=0)
-    {
-        _HitOutput[id]=float4(0,depth,OctEncode(normal));
-        _PointOutput[id]=float4(0,0,0,smoothness);
-        float3 geometry=SurfaceNormal(pixel,p);
-        geometry=normalize(mul(geometry,(float3x3)_WorldToView));
-        _SurfaceOutput[id]=float4(depth,OctEncode(geometry),smoothness);
-    }
+    position=0;
+    if(any(pixel<0) || any(pixel>=(int2)_Size.xy))return false;
+    float z=_WaterSurface.Load(int3(pixel,0)).x,scene=_HiZ0.Load(int3(pixel,0));
+    if(!isfinite(z) || z<=0 || z>=_Clip.y || abs(z-scene)>max(.005,scene*.0001))return false;
+    float3 ray=Position((pixel+.5)/_Size.xy,.5);
+    position=ray*(z/-ray.z);return all(isfinite(position));
 }
-
-bool AdaptiveOmitted(uint2 id)
-{
-    return _AdaptiveRays!=0 && _AdaptiveMask.Load(int3(id/2,0))>0 &&
-        ((id.x^id.y)&1)!=(uint)(_Frame&1);
-}
-
-// One lane classifies a complete quad. Reject unstable history, animated normals,
-// receiver edges, mirrors and moving objects. Refresh each quad every fourth
-// frame, staggered across the grid to avoid a periodic whole-image quality pulse.
 [numthreads(8,8,1)]
-void ClassifyAdaptive(uint3 id:SV_DispatchThreadID)
-{
-    uint2 base=id.xy*2;
-    if(any(base>=(uint2)_Size.zw))return;
-    bool stable=_AdaptiveHistory!=0 && (((uint)_Frame+id.x+id.y*3)&3)!=0 && all(base+1<(uint2)_Size.zw);
-    float3 firstNormal=0;float firstDepth=0,firstSmoothness=0,firstHit=0;
-    [unroll] for(uint i=0;i<4;i++)
-    {
-        if(!stable)break;
-        uint2 receiver=base+uint2(i&1,i>>1);
-        int2 pixel=min((int2)((receiver+.5)*_Size.xy/_Size.zw),(int2)_Size.xy-1);
-        float4 encoded=_Normals.Load(int3(pixel,0));
-        float3 normal=normalize(encoded.xyz*2-1+float3(0,0,1e-7));
-        float depth=SceneDepth(pixel,0),smoothness=_Specular.Load(int3(pixel,0)).a;
-        if(!EligibleReceiver(encoded,smoothness,depth) || smoothness>.99 ||
-            length(_AdaptiveMotion.Load(int3(pixel,0)).xy*_Size.xy)>.25) {stable=false;break;}
-        float3 p=EyePosition(pixel);
-        float4 prev=mul(_AdaptivePreviousClip,float4(p,1));
-        float2 uv=prev.xy/prev.w*.5+.5;
-        if(prev.w<=0 || any(uv<=0) || any(uv>=1)) {stable=false;break;}
-        int2 old=min((int2)(uv*_Size.zw),(int2)_Size.zw-1);
-        float4 guide=_AdaptiveGuide.Load(int3(old,0)),priorHit=_AdaptivePoint.Load(int3(old,0));
-        // prev.w is positive previous eye depth for a perspective projection.
-        if(abs(guide.y-prev.w)>max(.01,prev.w*.002) || dot(normal,OctDecode(guide.zw))<.999 ||
-            abs(smoothness-priorHit.w)>.005 || _AdaptiveSamples.Load(int3(old,0))<4 ||
-            _AdaptiveVariance.Load(int3(old,0))>.01) {stable=false;break;}
-        // Reject disappearance of a previously reflected surface.
-        if(priorHit.z<0)
-        {
-            float3 now=mul(_AdaptivePreviousToCurrent,float4(priorHit.xyz,1)).xyz;
-            float2 hitUv=Project(now);
-            if(now.z>=-_Clip.x || any(hitUv<=0) || any(hitUv>=1)) {stable=false;break;}
-            int2 hp=min((int2)(hitUv*_Size.xy),(int2)_Size.xy-1);
-            if(abs(SceneDepth(hp,0)+now.z)>max(.05,abs(now.z)*.01)) {stable=false;break;}
-        }
-        if(i==0) {firstNormal=normal;firstDepth=depth;firstSmoothness=smoothness;firstHit=guide.x;}
-        else if(dot(firstNormal,normal)<.998 || abs(depth-firstDepth)>max(.01,depth*.002) ||
-            abs(smoothness-firstSmoothness)>.005 || abs(guide.x-firstHit)>.1)stable=false;
-    }
-    _AdaptiveMaskOutput[id.xy]=stable?1:0;
-}
-
-// Reuse radiance only AFTER native pass 1 has applied hit fog/visibility.
-// Never copy hit UVs to a different receiver or average the native alpha.
-[numthreads(8,8,1)]
-void ReconstructAdaptive(uint3 id:SV_DispatchThreadID)
+void Trace(uint3 id:SV_DispatchThreadID)
 {
     if(any(id.xy>=(uint2)_Size.zw))return;
-    float4 original=_NativeResolved.Load(int3(id.xy,0));
-    if(AdaptiveOmitted(id.xy))
-    {
-        uint2 a=id.xy^uint2(1,0),b=id.xy^uint2(0,1);
-        float hitA=_NativeTestInput.Load(int3(a,0)).w,hitB=_NativeTestInput.Load(int3(b,0)).w;
-        // Disagreement indicates a reflected silhouette. Preserve this receiver's
-        // native miss fallback instead of spreading a hit across that boundary.
-        if(hitA>0 && hitB>0)
-            original.rgb=(_NativeResolved.Load(int3(a,0)).rgb+_NativeResolved.Load(int3(b,0)).rgb)*.5;
-    }
-    _DenoiseOutput[id.xy]=original;
-}
-
-// SM5 equivalent of SSSR ray-list compaction. A group reserves one contiguous
-// span; ray order never affects the per-pixel blue-noise sample or hit record.
-[numthreads(8,8,1)]
-void ClassifyRays(uint3 id:SV_DispatchThreadID,uint lane:SV_GroupIndex)
-{
-    if(lane==0)groupRayCount=0;
-    GroupMemoryBarrierWithGroupSync();
-    bool eligible=false;uint offset=0;
-    if(all(id.xy<(uint2)_Size.zw))
-    {
-        int2 pixel=min((int2)((id.xy+_SampleOffset.xy)/_Size.zw*_Size.xy),(int2)_Size.xy-1);
-        float4 encodedNormal=_Normals.Load(int3(pixel,0));
-        float smoothness=_Specular.Load(int3(pixel,0)).a;
-        float depth=SceneDepth(pixel,0);
-        float3 normal=normalize(encodedNormal.xyz*2-1+float3(0,0,.0000001));
-        float3 p=Position((pixel+.5)/_Size.xy,.5);p*=depth/(-p.z);
-        InitializeReceiver(id.xy,pixel,smoothness,depth,normal,p);
-        eligible=EligibleReceiver(encodedNormal,smoothness,depth) && !AdaptiveOmitted(id.xy);
-        if(eligible)InterlockedAdd(groupRayCount,1,offset);
-    }
-    GroupMemoryBarrierWithGroupSync();
-    if(lane==0)InterlockedAdd(_RayCount[0],groupRayCount,groupRayBase);
-    GroupMemoryBarrierWithGroupSync();
-    if(eligible)_RayList[groupRayBase+offset]=id.y*(uint)_Size.z+id.x;
-}
-
-void TracePixel(uint3 id,bool initialize)
-{
-    if(any(id.xy>=(uint2)_Size.zw))return;
-    float2 uv=(id.xy+_SampleOffset.xy)/_Size.zw;
+#if defined(FTFX_WORK)
+    workIterations=workContinuation=workDescents=workFine=workLevels=workRepeated=workEligible=workRejected=0;
+    workLastFine=int2(-1,-1);
+#endif
+    float4 stats=0;
+    _TraceInfo[id.xy]=0;
+#if defined(FTFX_REJECTION_DIAGNOSTICS)
+    _TraceStop[id.xy]=0;
+#endif
+#if defined(FTFX_TRACE_DIAGNOSTICS)
+    _DepthHit[id.xy]=0;_SampleOutput[id.xy]=0;
+#endif
+    float2 uv=(id.xy+.5)/_Size.zw;
     int2 pixel=min((int2)(uv*_Size.xy),(int2)_Size.xy-1);
     float4 encodedNormal=_Normals.Load(int3(pixel,0));
     float3 normal=encodedNormal.xyz*2-1;
     float smoothness=_Specular.Load(int3(pixel,0)).a;
     float depth=SceneDepth(pixel,0);
+    normal*=rsqrt(max(dot(normal,normal),1e-12));
+    _RadianceOutput[id.xy]=0;_RecordOutput[id.xy]=0;_HitOutput[id.xy]=float4(0,depth,OctEncode(normal));_PointOutput[id.xy]=float4(0,0,0,smoothness);
+    if(smoothness<_Trace.z || depth<=_Clip.x || depth>=_Clip.y*.999)return;
+    // Keep receiver guides, but reject before GGX and any Hi-Z traversal.
+    // View-space length equals camera-to-receiver distance.
+    if(_Clip.w>.5) {
+        LoadRasterMatrices();
+        float3 receiver=Position((pixel+.5)/_Size.xy,.5);receiver*=depth/(-receiver.z);
+        if(dot(receiver,receiver)>_Trace.x*_Trace.x)return;
+    }
+    if(all(encodedNormal==0) || dot(encodedNormal.xyz*2-1,encodedNormal.xyz*2-1)<1e-8) {TraceReason(id.xy,1,0,stats);return;}
+    // Probe-only receivers retain their guides but never enter GGX or traversal.
+    // Reflected source sampling and the original material G-buffer stay intact.
+    if(_ZeroSmoothnessProbe!=0 && smoothness==0 && any(_Specular.Load(int3(pixel,0)).rgb!=0))return;
+#if defined(FTFX_WORK)
+    workEligible=1;
+#endif
+
+    // Ineligible receivers need their guides, but no late raster matrix reads.
+    LoadRasterMatrices();
     float3 p=Position((pixel+.5)/_Size.xy,.5);
     p*=depth/(-p.z);
-    normal=normalize(normal+float3(0,0,.0000001));
-    if(initialize)InitializeReceiver(id.xy,pixel,smoothness,depth,normal,p);
-    if(!EligibleReceiver(encodedNormal,smoothness,depth))return;
-    if(AdaptiveOmitted(id.xy))return;
-    float3 n=normalize(mul((float3x3)_WorldToView,normal));
+    // Receiver guides retain the original material normal. This prototype does
+    // not weaken history/upsampling identity tests or change source-hit normals.
+    float3 traceNormal=normal;
+
+    float3 n=normalize(mul((float3x3)rasterView,traceNormal));
     float3 direction=reflect(normalize(p),n);
     float visibility=1;
-    if(_Stochastic!=0)
+    if(smoothness<1)
     {
-        float alpha=max((1-smoothness)*(1-smoothness),.0001);
-        if(dot(-normalize(p),n)<=0)return;
+        float alpha=(1-smoothness)*(1-smoothness);
+        if(dot(-normalize(p),n)<=0) {TraceReason(id.xy,2,-1,stats);return;}
         direction=SampleReflectionVector(normalize(p),n,alpha,id.xy);
         float cosine=dot(n,direction);
-        if(cosine<=0)return;
-        // Separable Smith G2/G1; native composition supplies material/Fresnel.
+        if(cosine<=0) {TraceReason(id.xy,2,-1,stats);return;}
+        // Separable Smith G2/G1; FTFX applies EFT's normalized material response.
         visibility=2*cosine/(cosine+sqrt(alpha*alpha+(1-alpha*alpha)*cosine*cosine));
     }
-    if(_NativeResponse!=0)
-    {
-        // Installed pass 0: normalize(lerp(normal, reflectedDirection, smoothness))
-        // and discard rays travelling back towards the camera.
-        if(_Stochastic==0)direction=normalize(lerp(n,direction,smoothness));
-        if(direction.z>0 && (_Stochastic==0 || _NativeTraceContract!=0))return;
-    }
-    // Native starts at the receiver, without the legacy world-space offsets.
-    // The initial screen-space advance below keeps the origin texel out.
-    float3 start=_NativeTraceContract!=0?p:p+n*.025+direction*.025;
-    if(start.z>=-_Clip.x)return;
-    float distance=_Trace.x;
-    if(direction.z>0) distance=min(distance,(-_Clip.x*1.01-start.z)/direction.z);
-    if(distance<=.05)return;
+    _PointOutput[id.xy]=float4(direction,smoothness);
+#if defined(FTFX_TRACE_DIAGNOSTICS) && !defined(FTFX_WORK)
+    _SampleOutput[id.xy]=float4(direction,(smoothness<1)?ReusePdf(-normalize(p),n,direction,smoothness):0);
+#endif
+    float3 start=p;
+    if(start.z>=-_Clip.x) {TraceReason(id.xy,3,-1,stats);return;}
+    float farDistance=direction.z<0?(-_Clip.y-start.z)/direction.z:1e20;
+    float nearDistance=direction.z>0?(-_Clip.x-start.z)/direction.z:1e20;
+    float4 originClip=mul(rasterProjection,float4(start,1));
+    float4 rayClip=mul(rasterProjection,float4(direction,0));
+    float sideDistance=min(min(PlaneExit(originClip.w+originClip.x,rayClip.w+rayClip.x),
+                               PlaneExit(originClip.w-originClip.x,rayClip.w-rayClip.x)),
+                           min(PlaneExit(originClip.w+originClip.y,rayClip.w+rayClip.y),
+                               PlaneExit(originClip.w-originClip.y,rayClip.w-rayClip.y)));
+    float boundaryDistance=min(farDistance,min(nearDistance,sideDistance));
+    // Eligible receivers trace to the frustum boundary without a hit-distance cap.
+    float distance=boundaryDistance;
+    bool farExit=farDistance<=min(nearDistance,sideDistance);
+    if(distance<=.05) {TraceReason(id.xy,3,-1,stats);return;}
     float3 finish=start+direction*distance;
     float2 a=Project(start), b=Project(finish), delta=b-a;
     float pixels=max(abs(delta.x)*_Size.x,abs(delta.y)*_Size.y);
-    if(pixels<2 || any(a<=0) || any(a>=1))return;
+    if(pixels<2 || any(a<=0) || any(a>=1)) {TraceReason(id.xy,3,-1,stats);return;}
     float epsilon=.005/pixels;
     float t=1.5/pixels;
     float2 edge=float2(delta.x>=0?1:0,delta.y>=0?1:0);
@@ -302,73 +239,187 @@ void TracePixel(uint3 id,bool initialize)
     if(abs(delta.y)>1e-8)limit=min(limit,(edge.y-a.y)*invDelta.y);
     float iz0=1/(-start.z), iz1=1/(-finish.z);
     int mip=0;
+    bool leftScreen=false;
+    // Relaxed return acceptance is fixed on. The former predicate
+    // (rearmed || stats.x>0) was invariant: rearmed began true and was only
+    // cleared after ContinueRejected incremented stats.x. No rearm state is
+    // needed; the bounded depth, self-hit, facing and range checks remain.
+    // Mip descent retains t: keep its UV and start depth until advancing.
+    float2 current=a+delta*t;
+    float z0=1/lerp(iz0,iz1,t);
     [loop] for(int iteration=0;iteration<(int)_Trace.w && t<limit;iteration++)
     {
-        float2 current=a+delta*t;
-        if(any(current<=0) || any(current>=1))break;
-        float cellSize=exp2((float)mip);
-        int2 cell=(int2)floor(current*_Size.xy/cellSize);
-        float2 boundary=(cell+edge)*cellSize/_Size.xy;
-        float2 crossings=(boundary-a)*invDelta;
-        if(abs(delta.x)<=1e-8)crossings.x=1e20;
-        if(abs(delta.y)<=1e-8)crossings.y=1e20;
-        float next=min(limit,min(crossings.x,crossings.y));
-        next=max(next,t+epsilon);
-        float z0=1/lerp(iz0,iz1,t), z1=1/lerp(iz0,iz1,next);
+#if defined(FTFX_WORK)
+        workIterations++;if(stats.x>0)workContinuation++;
+#endif
+        if(any(current<=0) || any(current>=1)) {leftScreen=true;break;}
+        int2 cell;float next;
+        {
+            // Supported mip levels are 0..13. Construct an exact power of two.
+            float cellSize=asfloat(0x3f800000u+((uint)mip<<23));
+            cell=(int2)floor(current*_Size.xy/cellSize);
+            float2 boundary=(cell+edge)*cellSize/_Size.xy;
+            float2 crossings=(boundary-a)*invDelta;
+            if(abs(delta.x)<=1e-8)crossings.x=1e20;
+            if(abs(delta.y)<=1e-8)crossings.y=1e20;
+            next=min(limit,min(crossings.x,crossings.y));
+            next=max(next,t+epsilon);
+        }
+        float z1=1/lerp(iz0,iz1,next);
         float surface=SceneDepth(cell,mip);
+#if defined(FTFX_WORK)
+        workLevels|=1u<<mip;
+        if(mip==0) {workFine++;if(all(cell==workLastFine))workRepeated++;workLastFine=cell;}
+#endif
         if(max(z0,z1)<surface-.001)
         {
-            t=next+epsilon;mip=min(mip+1,(int)_Clip.z);continue;
+            t=next+epsilon;current=a+delta*t;z0=1/lerp(iz0,iz1,t);
+            mip=min(mip+1,(int)_Clip.z);
+            continue;
         }
-        if(mip>0) { mip--;continue; }
+        if(mip>0) {
+#if defined(FTFX_WORK)
+            workDescents++;
+#endif
+            mip--;continue;
+        }
         if(surface<_Clip.y*.999 && min(z0,z1)<=surface+_Trace.y && max(z0,z1)>=surface)
         {
             float hitT=abs(iz1-iz0)>1e-9?(1/surface-iz0)/(iz1-iz0):t;
+            bool bracketed=min(z0,z1)<=surface && max(z0,z1)>=surface;
             hitT=clamp(hitT,t,next);
             float2 hitUv=a+delta*hitT;
             int2 hitPixel=clamp((int2)(hitUv*_Size.xy),0,(int2)_Size.xy-1);
-            float3 hitNormal=_Normals.Load(int3(hitPixel,0)).xyz*2-1;
-            hitNormal=normalize(mul((float3x3)_WorldToView,hitNormal)+float3(0,0,.0000001));
+#if defined(FTFX_TRACE_DIAGNOSTICS) && !defined(FTFX_WORK)
+            bool crossedCell=any(hitPixel!=cell);
+#endif
+            // A root clamped to a cell's exit boundary can round into its
+            // neighbour. Depth acceptance above belongs to cell, not that
+            // neighbour. The accepted source UV is retained unchanged.
+            float facing=1;
+            if(!BypassHitNormal()) {
+                float3 hitNormal=_Normals.Load(int3(hitPixel,0)).xyz*2-1;
+                hitNormal=mul((float3x3)rasterView,hitNormal);
+                hitNormal*=rsqrt(max(dot(hitNormal,hitNormal),1e-12));
+                facing=dot(hitNormal,-direction);
+            }
             float separation=length((hitUv-uv)*_Size.xy);
-            float facing=dot(hitNormal,-direction);
-            // Native does not reject the hit surface by its normal. Retain the
-            // bounded depth intersection; do not turn every behind-depth sample
-            // into a hit merely to match native's permissive stepping heuristic.
-            if(_NativeTraceContract!=0 || (separation>=2 && facing>.05))
+            // Live comparison bypasses only source-normal rejection/weighting.
+            // The bounded depth intersection and self-hit separation still
+            // apply; unrelated behind-depth samples cannot become hits.
+            // Self intersections remain terminal, including after a continued gap.
+            if(separation<2) {
+                // Preserve the rejected trace and its initial-contact record.
+                if(iteration==0 && stats.w==0) {
+                    stats=float4(0,0,0,32);
+#if defined(FTFX_REJECTION_DIAGNOSTICS)
+                    _TraceStop[id.xy]=float4(hitUv,1/lerp(iz0,iz1,hitT),surface);
+#endif
+                }
+                TraceReason(id.xy,4,-1,stats);return;
+            }
+            if(BypassHitNormal() || facing>.05)
             {
                 float2 border=min(hitUv,1-hitUv)*_Size.xy;
                 float edgeConfidence=_EdgePixels>0?saturate(min(border.x,border.y)/_EdgePixels):1;
-                float confidence=_NativeTraceContract!=0?1:edgeConfidence*saturate((smoothness-_Trace.z)/.1)*saturate(facing*4)*visibility;
+                float normalConfidence=BypassHitNormal()?1:saturate(facing*4);
+                float confidence=edgeConfidence*normalConfidence;
                 float residual=max(0,1/lerp(iz0,iz1,hitT)-surface);
-                if(_NativeTraceContract==0)confidence*=saturate(1-residual/max(_Trace.y,.001));
-                if(_WriteRawRadiance!=0)_RadianceOutput[id.xy]=float4(max(_Scene.Load(int3(hitPixel,0)).rgb,0),0);
-                if(_WriteGuides!=0)
+                float depthConfidence=saturate(1-residual/max(_Trace.y,.001));
+                // Diagnostic response control for already accepted thickness-
+                // only hits. Zero preserves the original weighting. This never
+                // accepts a previously rejected depth/facing/self candidate.
+                confidence*=bracketed?depthConfidence:lerp(depthConfidence,1,saturate(_ThicknessConfidenceFloor));
+#if defined(FTFX_TRACE_DIAGNOSTICS) && !defined(FTFX_WORK)
+                _DepthHit[id.xy]=float4((bracketed?1:2)+(crossedCell?4:0),depthConfidence,normalConfidence,edgeConfidence);
+#endif
+                _RadianceOutput[id.xy]=float4(max(_Scene.Load(int3(hitPixel,0)).rgb,0),visibility);
+
                 {
                     _HitOutput[id.xy]=float4(confidence,depth,OctEncode(normal));
                     float3 hitPosition=Position(hitUv,.5);hitPosition*=surface/(-hitPosition.z);
                     _PointOutput[id.xy]=float4(hitPosition,smoothness);
                 }
-                // Native pass 1 expects UV, traversal fraction, hit validity. Keep
-                // confidence separate so fogged radiance is not weighted twice.
-                _NativeTestOutput[id.xy]=float4(hitUv,(iteration+1)/_Trace.w,1);
+                // UV, traversal fraction, source classification. Coverage is separate.
+                _RecordOutput[id.xy]=float4(hitPixel,(iteration+1)/_Trace.w,1);
+                if(stats.x>0)stats.w=(int)stats.w | 4;
+                _TraceInfo[id.xy]=stats;
+                StoreTraversal(id.xy);
                 return;
             }
+            if(!ContinueRejected(id.xy,hitUv,max(z0,z1),surface,(next+epsilon-t)*pixels,2,stats)) {
+                TraceReason(id.xy,_Continuation.x>0?11:5,-1,stats);return;
+            }
+            // Later bounded candidates may be tested without a visible-space return.
+            t=next+epsilon;current=a+delta*t;z0=1/lerp(iz0,iz1,t);mip=0;continue;
         }
-        t=next+epsilon;mip=0;
+        // Bounded traversal through unknown foreground depth does not widen hit thickness.
+        // Zero allowance preserves the previous immediate unresolved return.
+        if(surface<_Clip.y*.999 && max(z0,z1)>=surface) {
+            if(!ContinueRejected(id.xy,current,max(z0,z1),surface,(next+epsilon-t)*pixels,1,stats)) {
+                TraceReason(id.xy,_Continuation.x>0?11:9,0,stats);return;
+            }
+        }
+        t=next+epsilon;current=a+delta*t;z0=1/lerp(iz0,iz1,t);mip=0;
     }
-}
-
-[numthreads(8,8,1)]
-void Trace(uint3 id:SV_DispatchThreadID,uint3 group:SV_GroupID,uint lane:SV_GroupIndex)
-{
-    // Keep one compiled traversal kernel for both schedules: separate FXC
-    // specializations can reassociate floating-point hit-position arithmetic.
-    if(_CompactRays!=0)
+    // Only a completed, in-frustum traversal to the far plane with background
+    // at its endpoint can establish sky. Offscreen, budget and blocked geometry misses cannot.
+    if(stats.x==0 && farExit && t>=1 && limit>=1 &&
+        all(b>0) && all(b<1) && SceneDepth((int2)(b*_Size.xy),0)>=_Clip.y*.999)
     {
-        uint index=(group.x+group.y*65535)*64+lane;
-        if(index>=_RayCount[0])return;
-        uint pixel=_RayList[index];id=uint3(pixel%(uint)_Size.z,pixel/(uint)_Size.z,0);
+        float2 border=min(b,1-b)*_Size.xy;
+        float c=_EdgePixels>0?saturate(min(border.x,border.y)/_EdgePixels):1;
+        _HitOutput[id.xy]=float4(c,depth,OctEncode(normal));
+        _PointOutput[id.xy]=float4(direction,smoothness);
+        _RadianceOutput[id.xy]=float4(0,0,0,visibility);
+        _RecordOutput[id.xy]=float4(b,distance,2);
+        StoreTraversal(id.xy);
+        return;
     }
-    TracePixel(id,_CompactRays==0);
+    // Report the terminal cause without changing any tracing/sky decisions.
+    // Unresolved foreground crossings already terminate at the point of loss.
+    float reason=leftScreen?6:t<limit?8:!farExit?6:10;
+    TraceReason(id.xy,reason,0,stats);
 }
 
+// Keep the original Trace entry point untouched. Adding this decision inside
+// its loop changed FXC rounding at borderline crossings, including when off.
+// Reason 10 proves completed traversal with a far exit and no budget stop.
+[numthreads(8,8,1)]
+void FinalizeContinuedSky(uint3 id:SV_DispatchThreadID)
+{
+    if(any(id.xy>=(uint2)_Size.zw))return;
+    float4 record=_RecordOutput[id.xy],stats=_TraceInfo[id.xy];
+    if(record.w!=0 || record.z!=10 || stats.x<=0 || _Continuation.x<=0 ||
+       ((int)stats.w&8)!=0 || stats.x>_Continuation.x || stats.y>_Continuation.y || stats.z>_Continuation.z)return;
+    LoadRasterMatrices();
+    int2 pixel=min((int2)((id.xy+.5)*_Size.xy/_Size.zw),(int2)_Size.xy-1);
+    // The broader scope changes receiver eligibility only. Failed/budgeted
+    // rays cannot reach this kernel's completed reason-10 recovery path.
+    float3 waterPoint;if(_GlobalContinuedSky==0 && !WaterPosition(pixel,waterPoint))return;
+    float4 guide=_HitOutput[id.xy],rayData=_PointOutput[id.xy];
+    float3 start=Position((pixel+.5)/_Size.xy,.5);start*=guide.y/(-start.z);
+    if(_Clip.w>.5 && dot(start,start)>_Trace.x*_Trace.x)return;
+    float3 direction=rayData.xyz;
+    if(direction.z>=0 || !all(isfinite(direction)))return;
+    float distance=(-_Clip.y-start.z)/direction.z;
+    float2 endpoint=Project(start+direction*distance);
+    if(distance<=.05 || any(endpoint<=0) || any(endpoint>=1) ||
+       _HiZ0.Load(int3((int2)(endpoint*_Size.xy),0))<_Clip.y*.999)return;
+    float visibility=1;
+    if(rayData.w<1) {
+        float3 traceNormal=_Normals.Load(int3(pixel,0)).xyz*2-1;
+        traceNormal*=rsqrt(max(dot(traceNormal,traceNormal),1e-12));
+
+        float3 n=normalize(mul((float3x3)rasterView,traceNormal));
+        float alpha=(1-rayData.w)*(1-rayData.w),cosine=dot(n,direction);
+        if(cosine<=0)return;
+        visibility=2*cosine/(cosine+sqrt(alpha*alpha+(1-alpha*alpha)*cosine*cosine));
+    }
+    float2 border=min(endpoint,1-endpoint)*_Size.xy;
+    guide.x=_EdgePixels>0?saturate(min(border.x,border.y)/_EdgePixels):1;
+    _HitOutput[id.xy]=guide;
+    _RadianceOutput[id.xy]=float4(0,0,0,visibility);
+    _RecordOutput[id.xy]=float4(endpoint,distance,2);
+    stats.w=(int)stats.w|64;_TraceInfo[id.xy]=stats;
+}

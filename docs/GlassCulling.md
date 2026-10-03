@@ -1,6 +1,6 @@
 # Glass Culling Fix
 
-Version 1.4.1 provides **F12 > Fuck These FX > Glass Culling Fix > Enabled**, on by default. It primarily helps on Streets of Tarkov. Existing saved preferences migrate from the old Glass Culling section; an existing new-name preference takes priority. It applies to the known `Global Fog/Transparent Reflective Specular` population on vehicles and buildings, without object-name or distance rules. AOReplacer does not bypass this feature.
+**F12 > Fuck These FX > Glass Culling Fix > Enabled** is on by default and active only on Streets of Tarkov. It stays inactive on every other map, where relevant performance gains have not been demonstrated. Existing saved preferences migrate from the old Glass Culling section; an existing new-name preference takes priority. It applies to the known `Global Fog/Transparent Reflective Specular` population on vehicles and buildings, without object-name or distance rules. AOReplacer does not bypass this feature.
 
 ## What the installed manager does
 
@@ -16,7 +16,7 @@ The September 26 scene dump identified 15,515 active, enabled glass renderers on
 
 ## Association and restoration
 
-Discovery requires a live non-hideout game and world. During native `Running`, `Runned`, `Starting` or `Started`, a `BaseLocalGame<EftGamePlayerOwner>` is ready when its native `PlayerOwner.Player` exists and belongs to the current `GameWorld`. These conditions are polled, so enabling during loading or initializing the feature later cannot miss an event. Other game types retain the `Started` fallback. Stopping/stopped states cancel discovery and restore glass; replacing either singleton invalidates associations. Discovery keeps the two-second quiet period after scene/group initialization and the staged work budget.
+Discovery requires a live non-hideout game and world with `GameWorld.LocationId` equal to `tarkovstreets` (case-insensitive). Unknown locations and every other map stay inactive. During native `Running`, `Runned`, `Starting` or `Started`, a `BaseLocalGame<EftGamePlayerOwner>` is ready when its native `PlayerOwner.Player` exists and belongs to the current `GameWorld`. These conditions are polled, so enabling during loading or initializing the feature later cannot miss an event. Other game types retain the `Started` fallback, subject to the same Streets-only restriction. Stopping/stopped states or leaving Streets cancel discovery and restore glass; replacing either singleton invalidates associations. Discovery keeps the two-second quiet period after scene/group initialization and the staged work budget.
 
 The installed Fika `CoopGame.InitPlayer` awaits player creation, assigns the inherited `_playerOwner`, creates the player camera, and then calls `WaitForHostToStart`, which creates the Start Raid button. EFT's native `BaseLocalGame.CG_Run` also assigns the owner before loot setup. The fix uses these native owner/player/world properties, with no Fika reference or startup patch. It can scan while waiting at Start Raid; it does not wait for the later gameplay `Started` status or require the camera to be active. Fika keeps its own local-player field, so readiness deliberately does not depend on `BaseLocalGame.LocalPlayer`.
 

@@ -1,16 +1,4 @@
 {
-  "denoiser": {
-    "repository": "https://github.com/GPUOpen-Effects/FidelityFX-Denoiser",
-    "commit": "d7dfecbabe7b9523b14e7b067216e06b86e8d189",
-    "files": {
-      "LICENSE.txt": "4416f935e8b98e8df6a75f4f9954deff6f2c0dbd",
-      "ffx-reflection-dnsr/ffx_denoiser_reflections_common.h": "393398b543162bd6132d3e6f251bffe153ed8ad0",
-      "ffx-reflection-dnsr/ffx_denoiser_reflections_config.h": "ca224cc9fa2fe6ad6faec3cc8f40ac667e96c8f5",
-      "ffx-reflection-dnsr/ffx_denoiser_reflections_prefilter.h": "cebdaec4613c5e44d511b7a369dbb8d5fa94a371",
-      "ffx-reflection-dnsr/ffx_denoiser_reflections_reproject.h": "06e92598b9258b0016aa8cf49f4119cc4d959c59",
-      "ffx-reflection-dnsr/ffx_denoiser_reflections_resolve_temporal.h": "136294172a0398e30137f5dece199ad73becaa37"
-    }
-  },
   "sssr": {
     "repository": "https://github.com/GPUOpen-Effects/FidelityFX-SSSR",
     "commit": "34dcacd1feefcfab2855b82e76c7d711f2020a75",

@@ -1,3 +1,4 @@
+using System;
 using EFT;
 
 namespace FuckTheseFX.Source.GlassCulling
@@ -7,6 +8,7 @@ namespace FuckTheseFX.Source.GlassCulling
         internal static bool IsReady(AbstractGame game, GameWorld world)
         {
             if (!game || !world || game.GameType == EGameType.Hideout) return false;
+            if (!string.Equals(world.LocationId, "tarkovstreets", StringComparison.OrdinalIgnoreCase)) return false;
             switch (game.Status)
             {
                 case GameStatus.Running:

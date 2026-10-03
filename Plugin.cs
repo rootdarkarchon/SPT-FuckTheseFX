@@ -8,6 +8,10 @@ using FuckTheseFX.Source.Occlusion;
 using FuckTheseFX.Source.Vintage;
 using FuckTheseFX.Source.GlassCulling;
 using FuckTheseFX.Source.StochasticSSR;
+using FuckTheseFX.Source.Water;
+using FuckTheseFX.Source.Prism;
+using FuckTheseFX.Source.Sharpen;
+using FuckTheseFX.Source.PostEffects;
 
 namespace FuckTheseFX
 {
@@ -17,13 +21,16 @@ namespace FuckTheseFX
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Guid = "com.rootdarkarchon.fuckthesefx";
-        public const string Version = "1.6.0";
+        public const string Version = "1.7.0";
         internal static ManualLogSource MyLog;
         internal static ConfigEntry<bool> AmbientHighlightEnabled, BloomUseNativeResolution, DistantShadowSamplingEnabled;
         internal static ConfigEntry<bool> BloomEnabled, DistantShadowsEnabled;
         internal static ConfigEntry<bool> VintageEnabled;
         internal static ConfigEntry<bool> GlassCullingEnabled;
         internal static ConfigEntry<float> BloomInputScale;
+        internal static ConfigEntry<float> PrismExposurePercent;
+        internal static ConfigEntry<bool> SharpenEnabled;
+        internal static ConfigEntry<bool> SkipInactiveEffects;
         internal static ConfigEntry<DistantShadowMaskResolution> DistantShadowResolution;
         internal static ConfigEntry<int> DistantShadowQuarterSamples, DistantShadowHalfSamples, DistantShadowFullSamples;
         private AmbientHighlightIntegration highlight;
@@ -36,6 +43,13 @@ namespace FuckTheseFX
         private GlassCullingIntegration glassCulling;
         internal static SsrSettings Ssr;
         private StochasticSsrIntegration ssr;
+        internal static ConfigEntry<WaterSurfaceMode> WaterSurface;
+        internal static ConfigEntry<bool> WaterSurfaceDiagnosticTint;
+        internal static ConfigEntry<float> WaterSurfaceSize, WaterSurfaceStrength, WaterFineRippleStrength, WaterAnimationSpeed;
+        private WaterSurfaceIntegration water;
+        private PrismExposureIntegration prismExposure;
+        private SharpenFilterIntegration sharpen;
+        private InactiveEffectsIntegration inactiveEffects;
 
         private void Awake()
         {
@@ -48,6 +62,14 @@ namespace FuckTheseFX
             vintage = new VintageFilterIntegration();
             glassCulling = new GlassCullingIntegration();
             ssr = new StochasticSsrIntegration(Info.Location, Ssr);
+            water = new WaterSurfaceIntegration();
+            prismExposure = new PrismExposureIntegration();
+            sharpen = new SharpenFilterIntegration();
+            inactiveEffects = new InactiveEffectsIntegration();
+            FeatureStartup.TryInitialize("Inactive screen effects", inactiveEffects.Initialize);
+            FeatureStartup.TryInitialize("Prism exposure", prismExposure.Initialize);
+            FeatureStartup.TryInitialize("Sharpen filter", sharpen.Initialize);
+            FeatureStartup.TryInitialize("Water surface", () => water.Initialize(Info.Location));
             FeatureStartup.TryInitialize("Stochastic SSR", ssr.Initialize);
             FeatureStartup.TryInitialize("Glass culling", glassCulling.Initialize);
             FeatureStartup.TryInitialize("Vintage filter", vintage.Initialize);
@@ -72,6 +94,12 @@ namespace FuckTheseFX
                 "When enabled uses vanilla Tarkovs behavior: Adds extra ambient brightness to weapons, hands and selected objects. Off removes this artificial glow. Performance: no measurable impact.");
             VintageEnabled = config.Bind("Vintage Filter", "Enabled", false,
                 "Off disables the vintage camera filter. On restores effects disabled by Fuck These FX. Performance: no measurable impact.");
+            SharpenEnabled = config.Bind("Sharpen Filter", "Enabled", true,
+                "On retains Tarkov's CC_Sharpen filter. Off removes the filter, including its combined desaturation. Applies live; enabling restores only effects disabled by Fuck These FX.");
+            SkipInactiveEffects = config.Bind("Inactive Effects", "Skip neutral passes", true,
+                "Skips neutral status-effect copies inside the active upscaler image chain. Zero-aperture disc DoF retains its native alpha/CoC pass and skips blur/compositing. Active effects and ordinary rendering retain native behavior. Applies live.");
+            PrismExposurePercent = config.Bind("Prism Exposure", "Resolution percent", 100f,
+                new ConfigDescription("Side length of the square exposure sampling grid as a percentage of the game's original half-width grid. At 4K: 100% = 1920x1920, 50% = 960x960. Lower values reduce exposure sampling detail; scene sharpness and tone-mapping resolution are unchanged. 100% retains native behavior.", new AcceptableValueRange<float>(1f, 100f)));
             BloomEnabled = config.Bind("Ultimate Bloom", "Enabled", true,
                 "Adjusts bloom and lens-flare detail. Off keeps the game's original bloom. Performance: positive impact when reducing input scale.");
             BloomInputScale = config.Bind("Ultimate Bloom", "Bloom input scale", .67f,
@@ -94,6 +122,18 @@ namespace FuckTheseFX
                 new ConfigDescription("More samples smooth full-resolution shadow edges and reduce flicker. 25 uses native filtering.", new AcceptableValueRange<int>(1, 25)));
             Occlusion = new OcclusionSettings(config);
             Ssr = new SsrSettings(config);
+            WaterSurface = config.Bind("Water Surface", "Mode", WaterSurfaceMode.Native,
+                "Native keeps Tarkov water. FTFX uses broader, slower waves and gentler fine ripples on Customs, including optics. Other maps and water families remain native.");
+            WaterSurfaceDiagnosticTint = config.Bind("Water Surface", "Show replacement tint", false,
+                "Colors FTFX water bright magenta to confirm that the replacement is visible. Native stays normal. Turn off after checking the switch.");
+            WaterSurfaceSize = config.Bind("Water Surface", "Surface size", 1f,
+                new ConfigDescription("FTFX only. Larger values spread the surface patterns over a larger area. 1 uses the phase 2 default.", new AcceptableValueRange<float>(.25f,4f)));
+            WaterSurfaceStrength = config.Bind("Water Surface", "Surface strength", 1f,
+                new ConfigDescription("FTFX only. Strength of the surface normal variation. 0 flattens it; native rain ripples remain active. 1 uses the phase 2 default.", new AcceptableValueRange<float>(0f,2f)));
+            WaterFineRippleStrength = config.Bind("Water Surface", "Fine ripple strength", 1f,
+                new ConfigDescription("FTFX only. Strength of fine detail relative to the broader patterns. 0 removes fine detail. 1 uses the restrained phase 2 default.", new AcceptableValueRange<float>(0f,4f)));
+            WaterAnimationSpeed = config.Bind("Water Surface", "Animation speed", 1f,
+                new ConfigDescription("FTFX only. Surface pattern movement speed. Changes preserve the current pattern position; 0 freezes it in place. Native foam and rain still animate. 1 uses the phase 2 default.", new AcceptableValueRange<float>(0f,2f)));
         }
 
         private static void RemoveRetiredSettings(ConfigFile config)
@@ -125,7 +165,7 @@ namespace FuckTheseFX
                 string newValue = current.Value;
                 config.Remove(current.Definition);
                 var entry = config.Bind("Glass Culling Fix", "Enabled", true,
-                    "Makes omitted glass follow native culling of vehicle parts, windows and enclosing building sections. Primarily helps performance on Streets of Tarkov. Off restores normal glass rendering.");
+                    "Only active on Streets of Tarkov. Makes omitted glass follow native culling of vehicle parts, windows and enclosing building sections to improve performance. Inactive on all other maps. Off restores normal glass rendering.");
                 if (bool.TryParse(newValue, out bool value) || bool.TryParse(oldValue, out value)) entry.Value = value;
                 return entry;
             }
@@ -145,16 +185,20 @@ namespace FuckTheseFX
             occlusion?.Update();
             glassCulling?.Update();
             ssr?.Update();
+            water?.Update();
         }
 
-        private void OnDisable() { glassCulling?.Suspend(); ssr?.Suspend(); }
-        private void OnEnable() { ssr?.Resume(); }
+        private void OnDisable() { glassCulling?.Suspend(); ssr?.Suspend(); water?.Suspend(); }
+        private void OnEnable() { ssr?.Resume(); water?.Resume(); }
 
         private void OnDestroy()
         {
             glassCulling?.Dispose();
+            water?.Dispose();
             ssr?.Dispose();
             vintage?.Dispose();
+            sharpen?.Dispose(); prismExposure?.Dispose();
+            inactiveEffects?.Dispose();
             occlusion?.Dispose(); sampling?.Dispose(); resolution?.Dispose(); highlight?.Dispose(); bloom?.Dispose();
         }
         private void OnGUI() => occlusion?.DrawDiagnostic();

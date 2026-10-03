@@ -44,6 +44,11 @@ Shader "Hidden/FuckTheseFX/WriteScreenAmbient"
     #endif
    #endif
    samplerCUBE _MyGlobalReflectionProbe;
+   #ifdef FTFX_SURFACE_CAPTURE
+    RWTexture2D<float4> _FTFX_CA_SurfaceColour : register(u5);
+    float _FTFX_CA_SurfaceCaptureEnabled;
+    float4 _FTFX_CA_SurfaceCaptureSize;
+   #endif
    float4 _SHAr, _SHAg, _SHAb, _SHBr, _SHBg, _SHBb, _SHC;
    float _ReflectionBottomShade, _AmbientBlur, _ReflectionIntensity;
    float TOD_Fogginess, _NightVisionOn, _FTFX_CAAmount;
@@ -76,6 +81,13 @@ Shader "Hidden/FuckTheseFX/WriteScreenAmbient"
     float3 unitNormal = normalize(normal);
     float4 spec = tex2D(_CameraGBufferTexture1,uv);
     float4 albedo = tex2D(_CameraGBufferTexture0,uv);
+    #ifdef FTFX_SURFACE_CAPTURE
+     if(_FTFX_CA_SurfaceCaptureEnabled>.5) {
+      int2 pixel=(int2)input.pos.xy;
+      if(all(pixel>=0) && all(pixel<(int2)_FTFX_CA_SurfaceCaptureSize.xy))
+       _FTFX_CA_SurfaceColour[pixel]=float4(albedo.rgb,1);
+     }
+    #endif
     float visibility = 1 - tex2D(_StencilShadow,uv).a;
 
     // All reflection consumers, including native SSR, share GBuffer0's reflection visibility.
@@ -92,7 +104,6 @@ Shader "Hidden/FuckTheseFX/WriteScreenAmbient"
     reflection *= tex2D(_CameraMotionVectorsDepth,uv).r >= depth - .00001 ? .25 : 1;
     reflection *= _ReflectionIntensity == 1 && albedo.a < .5 ? 2 * albedo.a : 1;
     reflection *= visibility;
-
     float3 upward = ToAmbientGamma(float3(_SHAr.y+_SHAr.w,_SHAg.y+_SHAg.w,_SHAb.y+_SHAb.w)-_SHC.rgb);
     float3 directional = AmbientSH(normal);
     #ifdef FTFX_BENT_DIAGNOSTICS
@@ -194,6 +205,7 @@ Shader "Hidden/FuckTheseFX/WriteScreenAmbient"
    #pragma multi_compile_local __ FTFX_BENT_NORMALS
    #pragma multi_compile_local __ FTFX_BENT_DIAGNOSTICS
    #pragma multi_compile_local __ FTFX_FOLIAGE_CAPTURE
+   #pragma multi_compile_local __ FTFX_SURFACE_CAPTURE
    ENDCG
   }
   Pass {

@@ -6,7 +6,6 @@ if ($LASTEXITCODE -ne 0) { throw 'SSR profiling build failed' }
 $built = Join-Path $repo 'obj\NativeSsrProfiling\plugin\netstandard2.1\FTFX.NativeSsrProfiling.dll'
 $expected = @{
     'BepInEx/plugins/FTFX.NativeSsrProfiling/FTFX.NativeSsrProfiling.dll' = $built
-    'BepInEx/plugins/FTFX.NativeSsrProfiling/README.md' = (Join-Path $repo 'docs\SSR.md')
 }
 New-Item -ItemType Directory -Force (Join-Path $repo 'bin\Research') | Out-Null
 $zip = Join-Path $repo 'bin\Research\FTFX-NativeSsrProfiling-0.1.0-SPT4.1.zip'

@@ -7,6 +7,7 @@ using UnityEngine.Rendering;
 using System.Security.Cryptography;
 using HarmonyLib;
 using UnityEngine;
+using FuckTheseFX.Source.StochasticSSR;
 
 namespace FuckTheseFX.Source.Occlusion
 {
@@ -65,6 +66,8 @@ namespace FuckTheseFX.Source.Occlusion
                 if(self.eligible(__1))
                 {
                     material.shader = self.shader;
+                    if(AmbientSurfaceCapture.Enabled) material.EnableKeyword("FTFX_SURFACE_CAPTURE");
+                    else material.DisableKeyword("FTFX_SURFACE_CAPTURE");
                     if(self.settings.LightingDebug) material.EnableKeyword("FTFX_BENT_DIAGNOSTICS");
                     else material.DisableKeyword("FTFX_BENT_DIAGNOSTICS");
                     if(self.settings.FoliageCapture && self.foliageTarget?.Invoke(__1) != null) material.EnableKeyword("FTFX_FOLIAGE_CAPTURE");
@@ -74,7 +77,7 @@ namespace FuckTheseFX.Source.Occlusion
                     material.SetFloat("_FTFX_CAAmount",self.settings.AmbientStrength.Value);
                     material.SetFloat("_FTFX_CA_FoliageStrength",self.settings.Foliage.Value);
                 }
-                else { material.DisableKeyword("FTFX_FOLIAGE_CAPTURE"); material.DisableKeyword("FTFX_BENT_DIAGNOSTICS"); material.DisableKeyword("FTFX_BENT_NORMALS"); material.shader = original; }
+                else { material.DisableKeyword("FTFX_SURFACE_CAPTURE"); material.DisableKeyword("FTFX_FOLIAGE_CAPTURE"); material.DisableKeyword("FTFX_BENT_DIAGNOSTICS"); material.DisableKeyword("FTFX_BENT_NORMALS"); material.shader = original; }
             }
             catch(Exception error) { Plugin.MyLog.LogError("CustomAmbient fix failed; native shader restored. "+error); self.Dispose(); }
         }
@@ -115,14 +118,15 @@ namespace FuckTheseFX.Source.Occlusion
         private static bool BeginDebugDraw(CommandBuffer cb, Camera camera, Material material)
         {
             var self = instance;
+            bool surface=AmbientSurfaceCapture.Begin(cb,camera,self!=null && material.shader==self.shader);
             var live = self != null && self.settings.FoliageLive && material.shader == self.shader ? self.liveTarget?.Invoke(camera) : null;
             live?.BeforeAmbient(cb);
             var target = self != null && self.settings.LightingDebug && material.shader == self.shader ? self.debugTarget?.Invoke(camera) : null;
-            if(target == null || !target.IsCreated()) return live != null;
+            if(target == null || !target.IsCreated()) return surface || live != null;
             if(self.settings.FoliageCapture)
             {
                 var foliage = self.foliageTarget?.Invoke(camera);
-                if(foliage == null) return false;
+                if(foliage == null) return surface;
                 foliage.BeforeAmbient(cb);
             }
             cb.SetGlobalVector("_FTFX_CA_DebugInfo",new Vector4((int)self.settings.View.Value,self.settings.LightingDebugGain,target.width,target.height));
@@ -133,15 +137,16 @@ namespace FuckTheseFX.Source.Occlusion
         private static void EndDebugDraw(bool captured, CommandBuffer cb, Camera camera)
         {
             if(!captured) return;
-            if(instance != null && instance.settings.FoliageLive) { instance.liveTarget?.Invoke(camera)?.AfterAmbient(cb); return; }
             cb.ClearRandomWriteTargets();
+            cb.SetGlobalFloat("_FTFX_CA_SurfaceCaptureEnabled",0);
+            if(instance != null && instance.settings.FoliageLive) { instance.liveTarget?.Invoke(camera)?.AfterAmbient(cb); return; }
             cb.SetGlobalFloat("_FTFX_CA_DebugAvailable",0);
             if(instance != null && instance.settings.FoliageCapture) instance.foliageTarget?.Invoke(camera)?.AfterAmbient(cb);
         }
         internal void Restore()
         {
             foreach(var pair in originals)
-                if(pair.Key != null && pair.Key.shader == shader && pair.Value != null) { pair.Key.DisableKeyword("FTFX_FOLIAGE_CAPTURE"); pair.Key.DisableKeyword("FTFX_BENT_DIAGNOSTICS"); pair.Key.DisableKeyword("FTFX_BENT_NORMALS"); pair.Key.shader = pair.Value; }
+                if(pair.Key != null && pair.Key.shader == shader && pair.Value != null) { pair.Key.DisableKeyword("FTFX_SURFACE_CAPTURE"); pair.Key.DisableKeyword("FTFX_FOLIAGE_CAPTURE"); pair.Key.DisableKeyword("FTFX_BENT_DIAGNOSTICS"); pair.Key.DisableKeyword("FTFX_BENT_NORMALS"); pair.Key.shader = pair.Value; }
             originals.Clear();
         }
         internal void Prune()
