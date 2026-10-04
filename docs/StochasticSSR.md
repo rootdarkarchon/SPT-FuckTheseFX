@@ -1,6 +1,6 @@
 # Stochastic GGX SSR
 
-2026-10-03: NRD REBLUR_SPECULAR is the standard and only FTFX GGX denoiser. The custom confidence/coverage temporal engine, its display filter, ray-launch normal stabilization and captured CustomAmbient subtraction have been removed. Their purpose, algorithms, settings, resources and restoration contracts were archived **before removal** in [Declined SSR implementations](SSR-declined-implementations-20261003.md), alongside exact source snapshots. That archive is not shipped in runtime packages.
+FTFX replaces supported main-camera screen-space reflections with stochastic GGX tracing and NRD REBLUR_SPECULAR denoising. For retired experiments and restoration records, see [historical implementations](history/SSR-declined-implementations-20261003.md).
 
 FTFX SSR is **off by default**. Keep SSR enabled in Tarkov when using it. Off restores native SSR; optics remain native. NRD initialization or dispatch failure restores native SSR; toggling FTFX SSR off/on retries. Missing runtime files require a restart after installation. The native backend requires D3D11; it has no NVIDIA vendor gate, CUDA or NVAPI dependency. AMD compatibility is intended but has not been tested on AMD hardware here.
 
@@ -50,7 +50,7 @@ Settings use the new **4. Stochastic GGX SSR** header. Percentages are stored as
 
 There are 25 SSR controls. Hit-normal rejection is permanently bypassed and bounded continued-sky recovery applies to every eligible receiver. Receiver-range settings and checks are removed. History frames accepts 1–32; continuation samples/pixels/depth separation accept 0–1000 / 0–2000 / 0–500. Probe fade start/end accept 0–50 / 0–150 metres. All other defaults and enum IDs remain as listed.
 
-The [subsequent source cleanup](SSR-cleanup-20261003.md) makes first-rejection diagnostics optional, removes unused temporal raster uploads and dead helpers, and retires the old loose validation suite. Ordinary tracing does not allocate or write the first-rejection target. Captures and RejectionLocation still enable it, with asynchronous lifetime preservation.
+First-rejection diagnostics are optional. Ordinary tracing does not allocate or write the first-rejection target. Captures and RejectionLocation still enable it, with asynchronous lifetime preservation.
 
 ## Validation and packages
 

@@ -87,7 +87,7 @@ Neutral status effects consequently issue **no copy or effect draw in the eligib
 
 ## Validation and live test
 
-Release build and configuration validation cover the 94 real settings plus one preset row, defaults/ranges, nondefault saved values, repeated binding, current-layout persistence, and both presets. `scripts/Test-PostEffectsContracts.ps1` checks Prism/sharpen, the three native module identities, five status wrapper handoffs, pure SSAA getters/final consumer, and the exact DoF CoC-to-disc-allocation boundary.
+Release build and configuration validation cover the current settings catalog, defaults/ranges, saved values, repeated binding, persistence and all four presets. `scripts/Test-PostEffectsContracts.ps1` checks Prism/sharpen, the three native module identities, five status wrapper handoffs, pure SSAA getters/final consumer, and the exact DoF CoC-to-disc-allocation boundary.
 
 `scripts/Test-PostEffects.ps1` runs **57 checks** in Unity 2022.3.43f1 on D3D11/RTX 4090. It imports the actual installed exposure allocation IL into a small fixture, patches it with the production integration, and observes real Unity temporary textures. Checks cover native 100%, 50%, integer 66%, other input sizes, rounding/minimum, invalid values, live setting changes, unsupported-method rejection and unpatching. Sharpen component fixtures cover selective restoration, native re-enabling, late cameras, destroyed objects and unsubscribing on disposal. These tests do not execute the complete EFT shaders or establish live exposure appearance/GPU savings.
 

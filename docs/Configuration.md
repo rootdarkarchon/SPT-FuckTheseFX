@@ -1,20 +1,20 @@
 # Configuration
 
-F12 > Fuck These FX exposes 98 real settings and one preset drawer. Numeric ranges are inclusive. Names ending in (%) store literal integer percentages; 20 means 20%, even when the maximum is 50.
+F12 > Fuck These FX exposes 98 settings and four preset buttons. Numeric ranges are inclusive. Names ending in (%) store literal integer percentages; 20 means 20%, even when the maximum is 50.
 
-Groups appear in numeric order: Presets, Vanilla Optimizations, XeGTAO, Screen Space Contact Global Illumination, Stochastic GGX SSR, Custom Water, Debug. ConfigurationManager 18.4 preserves registration order rather than sorting section names, so the plugin registers each section in this order before binding the remaining entries.
+Groups appear in numeric order: Presets, Vanilla Optimizations, XeGTAO, Screen Space Contact Global Illumination, Stochastic GGX SSR, Custom Water, Debug.
 
 **0. Presets**
 
-The first row contains **Vanilla → FTFX Vanilla+ (Default)**; the second contains **FTFX HQ Visuals** and **FTFX HQ+ Visuals** side by side. Hover over each button for its description. All buttons apply synchronously and save once. The backing UI entry is not a gameplay setting.
+The first row contains **Vanilla → FTFX Vanilla+ (Default)**; the second contains **FTFX HQ Visuals** and **FTFX HQ+ Visuals** side by side. Hover over each button for its description. Presets apply live and save your settings.
 
 The following note appears above the buttons:
 
-> Hold Shift while pressing on a preset button to restore full defaults. FTFX provides more settings than shown when enabling "Advanced Settings", the current advanced settings, presets and defaults are tuned and authored for visuals and performance.
+> Hold Shift while pressing on a preset button to restore full defaults. FTFX provides more settings than shown when enabling "Advanced Settings". The current advanced settings, presets and defaults are tuned and authored for visuals and performance.
 
 **Vanilla**, **FTFX Vanilla+ (Default)**, **FTFX HQ Visuals**, and **FTFX HQ+ Visuals** change only the eleven controls below on a normal click. All other values, including SSR history, water mode, tuning, and diagnostics, are preserved by these selective presets.
 
-Holding Shift while clicking any preset restores every shipped default first, then applies the selected preset's controls. For example, Shift-clicking FTFX HQ Visuals resets advanced settings, water mode, diagnostics and SSR history before applying HQ visuals. The reset and overrides form one operation and save once. HQ+ uses the HQ Visuals baseline and additionally enables SSCGI; its tooltip is "FTFX HQ Visuals, but with all effects enabled." For now SSCGI is its only additional override.
+Holding Shift while clicking any preset restores every shipped default first, then applies the selected preset's controls. For example, Shift-clicking FTFX HQ Visuals resets advanced settings, water mode, diagnostics and SSR history before applying HQ visuals. HQ+ uses the HQ Visuals baseline and additionally enables SSCGI.
 
 | Setting in Vanilla Optimizations (unless noted) | Vanilla | FTFX Vanilla+ | FTFX HQ Visuals | FTFX HQ+ Visuals |
 |---|---|---|---|---|
@@ -169,7 +169,3 @@ Existing configuration sections are not migrated or explicitly cleaned. Changed 
 - **ReflectionView:** `Normal`, `HitMask`, `HitUV`, `HitDepthDistance`, `RawHitRadiance`, `TodSkyRadiance`, `EnvironmentProbeRadiance`, `SourceClassification`, `Confidence`, `ChosenRadiance`, `NormalLength`, `NormalizedNormal`, `MaterialWeight`, `EnvironmentContribution`, `ReplacementDelta`, `EnvironmentRemovedScene`, `AddedReflection`, `TraceTermination`, `CoverageStages`, `ReconstructionLoss`, `ReceiverColourFallback`, `WaterCoverage`, `ContinuationSource`, `ContinuationCost`, `RejectionLocation`, `HaloStages`, `DepthHitKind`, `DepthHitConfidence`, `GapFillCoverage`.
 - **WaterSurfaceMode:** `Native`, `FTFX`.
 - **DistantShadowMaskResolution:** `Quarter`, `Half`, `Full`.
-
-## Live acceptance
-
-Open F12 and check header order, the four button labels and hover descriptions, integer percentage values, and advanced-only water controls. Change normal, advanced, and debug settings; Shift-click FTFX Vanilla+ (Default) and confirm every shipped default is restored, including SSR history = 8. Change water mode, SSR history and tuning again; verify that Vanilla, FTFX Vanilla+, FTFX HQ Visuals and FTFX HQ+ Visuals change only their listed controls and preserve those unrelated values. Shift-click each selective preset and confirm unrelated values reset to their shipped defaults before its overrides apply. Restart and confirm persistence. In a raid, compare bloom 50/100 and exposure 66/100, toggle XeGTAO/SSR through the selective presets, and return debug View to Normal before comparing rendering. Synthetic checks do not establish live EFT appearance or performance.

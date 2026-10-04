@@ -1,5 +1,7 @@
 # Declined SSR implementations: archive before NRD standardization
 
+> Historical record from 2026-10-03. See the [documentation index](../README.md) for current guides.
+
 Archived on 2026-10-03 before removal. These implementations were functional research paths, declined for production after the user preferred NRD's live visual results. This document records their intended behavior and restoration contracts, not a claim that they were universally ineffective.
 
 The exact pre-removal sources, shaders, validation sources and entry scripts are in `unity/StochasticSsrValidation/Baseline/BeforeNrdStandard/implementation.zip`, with SHA-256 hashes in `manifest.json`. Source/shader copies support regression comparison. They are excluded from the production assembly and runtime package. Detailed historical reports are entries under `docs/` in the verified local research archive described in [the cleanup record](SSR-cleanup-20261003.md). Do not restore old defaults, vendor/game assemblies or unrelated AO changes when reusing them.
@@ -42,7 +44,7 @@ The earlier matched sequential benchmark pair measured approximately +0.1298 ms 
 
 Restoration: restore capture producer/clear/lifetime, shader keyword and UAV layout, selection and exact diagnostic consumers together. Revalidate CustomAmbient draw ordering, HDR/deferred/main-camera restrictions, initialization, single-write status, resize, disabled capture and native recomputation energy parity. Do not restore any AO/bent-normal or foliage changes from the whole archived bridge/shader as an indiscriminate file replacement.
 
-Historical capture audit: `docs/AmbientReflectionCaptureTest.md` in the local research archive. Current [composition contract](SSR-reflection-contract.md).
+Historical capture audit: `docs/AmbientReflectionCaptureTest.md` in the local research archive. Current [composition contract](../SSR-reflection-contract.md).
 
 ## Retained production contract
 
@@ -50,4 +52,4 @@ Full-density GGX Hi-Z tracing and bounded foreground continuation stay. Raw cove
 
 ## Post-removal validation record
 
-The isolated NRD-standard suite passed 1,386 checks, including exact output parity against this snapshot with NRD on, normal stabilization off and captured subtraction off. Raw tracing, resolve, NRD output and final composition matched for synthetic sequences and three captured slab/water/crane inputs. Both reconstruction choices, temporal on/off, animated normals, reset/resize/readback, resource recovery and native fallback/re-enable were covered. Separate AO/contact-GI and water-colour capture tests passed. These are regression fixtures, not live GPU performance measurements. See [current SSR documentation](StochasticSSR.md) for retained controls and runtime packaging.
+The isolated NRD-standard suite passed 1,386 checks, including exact output parity against this snapshot with NRD on, normal stabilization off and captured subtraction off. Raw tracing, resolve, NRD output and final composition matched for synthetic sequences and three captured slab/water/crane inputs. Both reconstruction choices, temporal on/off, animated normals, reset/resize/readback, resource recovery and native fallback/re-enable were covered. Separate AO/contact-GI and water-colour capture tests passed. These are regression fixtures, not live GPU performance measurements. See [current SSR documentation](../StochasticSSR.md) for retained controls and runtime packaging.

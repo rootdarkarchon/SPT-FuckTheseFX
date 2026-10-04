@@ -7,6 +7,7 @@
     <AssemblyVersion>1.8.5</AssemblyVersion>
     <FileVersion>1.8.5</FileVersion>
     <Authors>rootdarkarchon</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <Deterministic>true</Deterministic>
@@ -15,6 +16,7 @@
   <ItemDefinitionGroup><Reference><Private>false</Private></Reference></ItemDefinitionGroup>
   <ItemGroup>
     <Compile Remove="unity\**\*.cs" />
+    <None Update="LICENSE" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Assets\distantshadows" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Assets\stochasticssr" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Assets\nrdssr" CopyToOutputDirectory="PreserveNewest" />

@@ -69,6 +69,7 @@ try {
 } finally { $assembly.Dispose() }
 $expected = @{
     'BepInEx/plugins/FuckTheseFX/FuckTheseFX.dll' = $built
+    'BepInEx/plugins/FuckTheseFX/LICENSE' = (Join-Path $repo 'LICENSE')
     'BepInEx/plugins/FuckTheseFX/Licenses/XeGTAO.txt' = (Join-Path $repo 'unity\Assets\XeGTAO\Upstream\LICENSE')
 }
 foreach ($name in @('SSSR-LICENSE.txt')) {
@@ -95,6 +96,7 @@ foreach($inputFile in $diffuseInputs.PSObject.Properties){if((Get-FileHash -Lite
 # Manuals, test instructions and upstream provenance stay in the repository.
 $allowedEntries = @(
     'BepInEx/plugins/FuckTheseFX/FuckTheseFX.dll',
+    'BepInEx/plugins/FuckTheseFX/LICENSE',
     'BepInEx/plugins/FuckTheseFX/Licenses/XeGTAO.txt',
     'BepInEx/plugins/FuckTheseFX/Licenses/StochasticSSR/SSSR-LICENSE.txt'
 ) + @($assets | ForEach-Object { "BepInEx/plugins/FuckTheseFX/Assets/$_" })

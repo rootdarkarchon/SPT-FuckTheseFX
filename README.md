@@ -1,29 +1,64 @@
-# Fuck These FX
+# Fuck These FX (FTFX)
 
-Independent controls for EFT's ambient occlusion, stochastic reflections, distant shadows, ambient highlight, vintage filter and Ultimate Bloom. Requires SPT 4.1 / EFT 40743, using Direct3D 11.
+FTFX gives you control over Tarkov's lighting and post-processing in **SPT 4.1**. Keep a familiar vanilla look with rendering optimizations, or enable improved ambient occlusion, reflections and contact lighting.
 
-Open **F12 > Fuck These FX**. See the [complete configuration table](docs/Configuration.md) for all 98 settings, defaults, types, ranges and advanced flags.
+## Features
 
-- **0. Presets:** **Vanilla** applies vanilla rendering controls; **FTFX Vanilla+ (Default)** applies eleven controls for the vanilla baseline and minor performance fixes; **FTFX HQ Visuals** uses the same controls with ambient highlight/sharpen/vintage off and XeGTAO/SSR on. **FTFX HQ+ Visuals** adds SSCGI to the HQ Visuals baseline. The four selective presets preserve all other values. Buttons have hover descriptions, apply live and save once. Hold Shift while clicking any preset to restore all shipped defaults before applying it.
-- **1. Vanilla Optimizations:** contains Streets glass culling, additional ambient highlight, vintage/sharpen, neutral effect passes, Prism auto exposure, Ultimate Bloom input scale and distant-shadow resolution/filtering. Prism defaults to **66%**; bloom defaults to **50%**. Bloom at 100% uses the original input without a reduced copy. Glass culling remains Streets-only.
-- **2. XeGTAO:** disabled by default, with Quality 3 (Ultra) and an independent actor second pass. Custom ambient strength defaults to 60%, foliage ambient AO to 65%, and additional foliage AO to 20%. AO fade defaults to 100/250 metres, with limits 0–250 / 0–500. Game AO Off disables the replacement and actor pass. Optional bent normals remain off by default. See [occlusion](docs/Occlusion.md) and [foliage tests](docs/FoliageLightingTest.md).
-- **3. Screen Space Contact Global Illumination:** NRD-based, off by default; short-range diffuse colour bounce on the main HDR deferred camera. Defaults to 15% resolution (adjustable 10-50%), four cosine-weighted diffuse rays, strength 6 (adjustable up to 10) and 16 NRD history frames. Advanced Reconstruction cutoff skips faint denoised additions (default 0; try 0.001–0.005). Maximum bounce fraction is an integer percentage: default 20%, range 1–50%. See [contact GI](docs/ColorBleed.md).
-- **4. Stochastic GGX SSR:** off by default, R768 and eight history frames when enabled. Full-density GGX tracing, NRD REBLUR_SPECULAR denoising and native environment removal. SSR must be enabled in game; optics retain native SSR. Bounded continued sky recovery always covers all eligible receivers; source-normal rejection remains bypassed. There is no receiver-distance limit. Reconstruction and diagnostics remain advanced; SSR resolution is a normal setting. See [SSR behavior](docs/StochasticSSR.md).
-- **5. Custom Water:** all settings are advanced. Native by default; FTFX changes Customs v3 water normals on main and optic cameras. Surface size/strength, fine ripple strength and animation speed remain floating-point scales with their original ranges. Other maps retain native water. See [water](docs/Water.md).
-- **9. Debug:** contains AO, ambient, contact GI and foliage views. View = Normal restores the scene. Diagnostic views/captures add work; return to Normal before benchmarking.
+- **Vanilla rendering controls:** toggle the ambient highlight, vintage and sharpen filters; adjust bloom and exposure sampling; skip unnecessary passes when supported effects are inactive.
+- **Distant shadows:** choose shadow resolution and filtering to balance detail, smoothness and GPU work.
+- **XeGTAO ambient occlusion:** replace native AO, with separate actor shading and controls for ambient and foliage lighting.
+- **Stochastic GGX reflections:** replace main-camera screen-space reflections with NRD-denoised reflections. Optics keep native SSR.
+- **Screen Space Contact Global Illumination (SSCGI):** add short-range colour bounce from nearby surfaces.
+- **Customs water:** optional surface and ripple controls for supported Customs water, including optic views.
 
-Fractional controls now use integer percentage values and names ending in **(%)**. Physical distances, luminance, gains, and scales allowing values above 1 retain their units. No previous configuration keys are imported or cleaned up; only the new layout is bound.
+The default **FTFX Vanilla+** settings keep XeGTAO, FTFX reflections and SSCGI off. Performance and appearance depend on the scene, hardware and settings.
 
-All controls apply live. XeGTAO, CustomAmbient, Contact GI, bloom and stochastic SSR follow FTFX settings without checking for AOReplacer or SSRSix.
+## Requirements
 
-Close the game and extract the ZIP into the SPT directory. Remove the standalone FTFX SSR Prototype when upgrading. Prototype settings are not imported. Settings are saved in `BepInEx/config/com.rootdarkarchon.fuckthesefx.cfg`; AOReplacer settings are not imported.
+- **SPT 4.1 / EFT build 40743**
+- **Direct3D 11**
+- **BepInEx ConfigurationManager** to access settings through F12
 
-Build with `scripts/Build-Package.ps1`. Shader and hook validation uses Unity 2022.3.43f1; see [distant shadows](docs/DistantShadows.md). Run `scripts/Test-BloomResolution.ps1` for bloom validation. Automated checks do not establish live-game image quality or FPS gains.
+## Installation
 
-See [occlusion implementation and validation](docs/Occlusion.md). XeGTAO uses [Intel's MIT-licensed implementation](https://github.com/GameTechDev/XeGTAO); its license is included in the package.
+1. Close the game.
+2. Download a release ZIP from [GitHub Releases](https://github.com/rootdarkarchon/SPT-FuckTheseFX/releases).
+3. Extract it into your SPT installation folder, merging the `BepInEx` folder.
+4. Start the game and open **F12 > Fuck These FX**.
 
-AmbientShares separates diffuse/fill luminance: red is directional SH, green upward SH, blue fill. AmbientDirectional, AmbientUpward and AmbientFill show their final contributions with a shared Ambient contribution gain (default 1). AmbientInteriorTransmission shows how much directional SH survives the interior blend and visibility, before albedo and AO (black 0%, white 100%). These views work with bent normals on or off and exclude reflections/direct lights. Shares/transmission ignore gain. Use Normal before measuring performance.
+When updating, replace the complete `BepInEx/plugins/FuckTheseFX` folder so the DLLs and shader assets match. Keep your configuration file to retain saved settings. Remove the standalone **FTFX SSR Prototype** if you used it previously.
 
-Stochastic SSR retains adapted AMD GGX sampling and blue noise with custom traversal and Tarkov material composition. The AMD reflections denoiser has been removed. Sampling licenses and provenance remain under `Licenses/StochasticSSR`.
+## Choose a preset
 
-See [Build and validation](docs/BuildValidation.md) for native dependencies, shader rebuilds, private replay inputs and package checks.
+| Preset | What it changes |
+| --- | --- |
+| **Vanilla** | Restores the vanilla baseline controls and disables FTFX fixes and replacement effects. |
+| **FTFX Vanilla+ (Default)** | Keeps the vanilla baseline appearance with minor rendering optimizations. |
+| **FTFX HQ Visuals** | Enables XeGTAO and FTFX reflections, with ambient highlight, vintage and sharpen off. |
+| **FTFX HQ+ Visuals** | Uses HQ Visuals and additionally enables SSCGI. |
+
+A normal click changes only the preset's listed controls and preserves your other tuning. **Hold Shift while clicking** to restore all shipped defaults before applying the preset. This also resets advanced settings and debug views.
+
+Settings apply live and save to `BepInEx/config/com.rootdarkarchon.fuckthesefx.cfg`. Enable **Advanced Settings** in ConfigurationManager for additional tuning. See the [configuration reference](docs/Configuration.md) for the full preset comparison and every setting.
+
+## Using the replacement effects
+
+- **XeGTAO:** keep AO enabled in Tarkov's graphics settings. Setting game AO to Off also disables FTFX's AO and actor pass.
+- **FTFX reflections:** keep SSR enabled in Tarkov's graphics settings. The replacement runs on supported main cameras; optics retain native SSR.
+- **SSCGI:** requires XeGTAO and a supported main HDR deferred camera. It can run with FTFX reflections off.
+- **Custom water:** select **Advanced Settings > 5. Custom Water > Mode > FTFX**. Native is the default; other maps keep their native water.
+- **Glass culling fix:** applies only to Streets of Tarkov.
+
+Turn debug views back to **Normal** and disable captures before comparing performance. Older configuration keys are not migrated; Shift-click **FTFX Vanilla+ (Default)** when you want the current defaults.
+
+## Documentation and support
+
+The [documentation index](docs/README.md) links to effect guides, troubleshooting comparisons and developer build instructions.
+
+For a bug report, include your SPT/EFT and FTFX versions, map, graphics settings, selected preset or changed settings, and steps to reproduce. Attach the relevant BepInEx log and screenshots when they help show the issue. Submit reports through [GitHub Issues](https://github.com/rootdarkarchon/SPT-FuckTheseFX/issues).
+
+## License and credits
+
+FTFX's own code is available under the [MIT License](LICENSE).
+
+FTFX uses Intel's XeGTAO, AMD's SSSR sampling and blue noise, and NVIDIA's NRD denoiser. These components retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md). The runtime package includes the applicable license texts.

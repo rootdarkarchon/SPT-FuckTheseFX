@@ -1,6 +1,6 @@
 # Screen Space Contact GI — NRD implementation
 
-SSCGI now traces short cosine-weighted diffuse rays and passes incident radiance to the pinned NRD 4.18.0 `REBLUR_DIFFUSE` backend. It remains main-camera, HDR deferred, opaque contact bounce with a XeGTAO dependency. FTFX SSR does not need to be enabled. There is no sky/environment fallback.
+SSCGI traces short cosine-weighted diffuse rays and passes incident radiance to the pinned NRD 4.18.0 `REBLUR_DIFFUSE` backend. It remains main-camera, HDR deferred, opaque contact bounce with a XeGTAO dependency. FTFX SSR does not need to be enabled. There is no sky/environment fallback.
 
 ## In-game comparison
 
@@ -10,7 +10,7 @@ SSCGI now traces short cosine-weighted diffuse rays and passes incident radiance
 4. Repeat with TAA and DLSS, and with FTFX SSR off/on. Inspect foliage, water and actors. Test hideout/raid transitions, resize, graphics changes and toggling GI. Record which settings and scene produced each observation.
 5. For diagnostic inspection use the contribution, raw, denoised, hit-distance or trace views. Return to Normal and turn captures off before measuring performance.
 
-The user approved the current NRD SSCGI implementation on 2026-10-04 following in-game visual review and on/off GPU benchmarks. The accepted configuration is 15% resolution, Strength 6 and the defaults listed below. The retired donor gather/custom-denoiser implementation and frozen comparison sources have been removed. Synthetic tests continue to check signal contracts and resource behavior; they do not substitute for in-game visual review.
+The current defaults were reviewed in game and benchmarked on 2026-10-04 at 15% resolution and Strength 6. Synthetic tests continue to check signal contracts and resource behavior; they do not substitute for in-game visual review.
 
 
 ## Controls and cap semantics

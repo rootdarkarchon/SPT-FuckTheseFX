@@ -1,5 +1,7 @@
 # SSR source cleanup after NRD standardization
 
+> Historical record from 2026-10-03. See the [documentation index](../README.md) for current guides.
+
 The pre-removal archive remains unchanged. Its `implementation.zip` already contains exact copies of all 24 retired root validation C# files; byte equality was checked before removing those loose files. A supplemental archive at `unity/StochasticSsrValidation/Baseline/BeforeNrdStandard/CleanupSupplement` preserves the retired profiler-test entry point, three obsolete fixture shaders, native diagnostic export and pre-cleanup helper/pipeline sources, with SHA-256 hashes. Nothing in these archives is shipped.
 
 ## Runtime changes
@@ -27,6 +29,6 @@ All 519 entries listed in `archive-manifest.json` were SHA-256 verified before r
 
 `BeforeNrdStandard`, its original `implementation.zip`/manifest and `CleanupSupplement` remain in the source tree for regression and restoration. The native material-response audit, water extraction/generation tools, current water fixtures and separate profiling tools remain. The obsolete DirectFinalMip A/B field is removed from production; its former default-true path is fixed without changing rendering or configuration.
 
-Current documentation is [SSR behavior](StochasticSSR.md), [water surface](Water.md), [rendering contracts](SSR-reflection-contract.md), [build preparation](BuildValidation.md) and [declined implementations](SSR-declined-implementations-20261003.md). Original historical documents remain readable inside the local research archive, with their evidence and internal paths intact.
+Current documentation is [SSR behavior](../StochasticSSR.md), [water surface](../Water.md), [rendering contracts](../SSR-reflection-contract.md), [build preparation](../BuildValidation.md) and [declined implementations](SSR-declined-implementations-20261003.md). Original historical documents remain readable inside the local research archive, with their evidence and internal paths intact.
 
 After fixing the receiver-fallback path and pruning the research tree, the fresh NRD regression passed all 1,559 checks. The Release build, all package contracts, 100 configuration checks and all 12 package-entry hashes passed. The rebuilt `FuckTheseFX-1.7.0-SPT4.1-ssr-cleanup.zip` has SHA-256 `08F2B69E55759E776BCC9FB630D17B89B80E591F037D39AB01A3B69849CD944A`. Sandbox Unity/SDK access failures were resolved by rerunning the same checks with normal access. No game installation or live GPU benchmark was performed.

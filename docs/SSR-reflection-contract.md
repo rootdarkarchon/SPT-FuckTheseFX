@@ -1,6 +1,6 @@
 # Reflection rendering contract
 
-The current controls and defaults are in [Stochastic SSR](StochasticSSR.md). This reference describes the production NRD renderer on EFT 40743 / SPT 4.1, D3D11. Historical derivations and rejected experiments are preserved in the local archive described in [the cleanup record](SSR-cleanup-20261003.md).
+The current controls and defaults are in [Stochastic SSR](StochasticSSR.md). This reference describes the production NRD renderer on EFT 40743 / SPT 4.1, D3D11. Historical derivations and rejected experiments are preserved in the local archive described in [the cleanup record](history/SSR-cleanup-20261003.md).
 
 ## Ownership and signal
 

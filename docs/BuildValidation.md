@@ -41,16 +41,30 @@ Use Python with UnityPy for reference extraction. The extraction verifies the in
 
 `Generate-WaterParity.py` regenerates the checked-in arithmetic from the extracted audit; run it only when intentionally updating that source, then rerun water validation. Ordinary bundle builds use the checked-in shader sources.
 
+## Occlusion and SSCGI validation
+
+Run the current diffuse-NRD and AO suite after changes to occlusion or contact GI:
+
+```powershell
+./scripts/Test-Occlusion.ps1
+```
+
+This rebuilds the occlusion bundle and records the diffuse native execution and input hashes required by packaging.
+
 ## Managed build and package
 
-After SSR and water validation, build the runtime package:
+After native, SSR, occlusion/SSCGI and water validation, build the runtime package:
 
 ```powershell
 ./scripts/Build-Package.ps1
 ```
 
-Packaging builds the managed DLL, runs the FX/configuration/ABI contracts, verifies validated source/bundle identities and checks every ZIP entry's hash. NRD's native DLL and adapter bundle are mandatory package inputs. Runtime packages contain only DLLs, assets and required licenses. The script does not install into the game or publish a release.
+Packaging builds the managed DLL, runs the FX/configuration/ABI contracts, verifies validated source/bundle identities and checks every ZIP entry's hash. NRD's native DLL and adapter bundle are mandatory package inputs. Runtime packages contain only DLLs, assets and required licenses, including the root FTFX MIT license. The script does not install into the game or publish a release.
 
 Every FuckTheseFX runtime package is written to `bin/Release/FuckTheseFX-<semver>-SPT4.1-<working-tree hash>.zip`, using the verified built plugin version and a deterministic 12-character SHA-256 digest of current tracked and non-ignored untracked file paths and contents. The hash includes uncommitted edits, renames and deletions, excludes ignored build outputs, and is independent of staging state. This exact filename is required for release and testing builds and must be preserved when copying or delivering the ZIP. Custom suffixes and alternative names are prohibited; packaging fails if the working tree cannot be hashed or changes during the build. See [repository instructions](../AGENTS.md).
 
 Validation projects, native oracles and receipts live under ignored `obj/`; packages live under ignored `bin/`. Source changes require fresh relevant validation before packaging. GPU fixtures establish rendering/resource contracts, not live raid appearance or frame-time improvement. Native SSR profiling and the separate research companion remain available for targeted investigations.
+
+## Manual configuration checks
+
+Open F12 and check header order, the four button labels and hover descriptions, integer percentage values, and advanced-only water controls. Change normal, advanced, and debug settings; Shift-click FTFX Vanilla+ (Default) and confirm every shipped default is restored, including SSR history = 8. Change water mode, SSR history and tuning again; verify that Vanilla, FTFX Vanilla+, FTFX HQ Visuals and FTFX HQ+ Visuals change only their listed controls and preserve those unrelated values. Shift-click each selective preset and confirm unrelated values reset to their shipped defaults before its overrides apply. Restart and confirm persistence. In a raid, compare bloom 50/100 and exposure 66/100, toggle XeGTAO/SSR through the selective presets, and return debug View to Normal before comparing rendering. Synthetic checks do not establish live EFT appearance or performance.

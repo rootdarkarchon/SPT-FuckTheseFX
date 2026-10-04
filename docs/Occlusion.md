@@ -20,7 +20,7 @@ The occlusion integration initializes independently of other rendering plugins. 
 
 ## Actor optimization
 
-Depth prefiltering remains full resolution and includes the entire scene. Actor radius changes depth-mip weighting, so the primary pyramid is not reused. An 8Ãƒâ€”8 tile classifier finds actors inside the distance cutoff; a full neighboring-tile halo supplies every AO/edge sample required by the single denoiser pass. Horizon sampling skips other tiles. The final denoiser skips inactive core tiles and writes neutral output, preventing stale shading as actors move. No GPU-to-CPU readback is used at runtime.
+Depth prefiltering remains full resolution and includes the entire scene. Actor radius changes depth-mip weighting, so the primary pyramid is not reused. An 8 x 8 tile classifier finds actors inside the distance cutoff; a full neighboring-tile halo supplies every AO/edge sample required by the single denoiser pass. Horizon sampling skips other tiles. The final denoiser skips inactive core tiles and writes neutral output, preventing stale shading as actors move. No GPU-to-CPU readback is used at runtime.
 
 The actor composite reads filtered integer AO and linear depth directly. It preserves the former RGHalf rounding and strength/response/distance/gamma equations, removing the intermediate full-screen RGHalf actor resolve. Quality, radius and normal input are unchanged. GPU markers distinguish actor depth, tiles, horizons, denoise and composite. This is expected to help when actors cover a small part of the screen; dense actor coverage can reduce the benefit. Live EFT timing remains the performance acceptance check.
 
@@ -30,7 +30,7 @@ The actor composite reads filtered integer AO and linear depth directly. It pres
 - `scripts/Test-CustomAmbient.ps1`: native-parity and bent-normal shader checks against the installed native ambient shader, including diffuse/fill, reflections, fog/night vision, authored zero-alpha foliage and both HDR encodings.
 - `scripts/Build-Package.ps1`: Release compilation, configuration entries, unchanged other-FX contracts, installed EFT AO/ambient/stencil ABI, AO initialization without installed-plugin bypasses, no Amplify dependency, exact ZIP allowlist and entry hashes.
 
-The actor GPU fixtures compare more than 83,000 actor pixels at 256Ãƒâ€”144 and 259Ãƒâ€”147, including sparse, full, edge, moving, empty and distance-rejected masks. Sampled actor output is bit-identical to the full-frame estimator; the fused composite matches the former resolve/composite within 0.000001. These tests establish the tested shader contracts, not live EFT visual or FPS acceptance.
+The actor GPU fixtures compare more than 83,000 actor pixels at 256 x 144 and 259 x 147, including sparse, full, edge, moving, empty and distance-rejected masks. Sampled actor output is bit-identical to the full-frame estimator; the fused composite matches the former resolve/composite within 0.000001. These tests establish the tested shader contracts, not live EFT visual or FPS acceptance.
 
 Bent normals are optional (Advanced: 2. XeGTAO / Custom Ambient Fix Bent normals, off by default).
 They steer only directional SH diffuse ambient; native upward blending, reflection, fill,
