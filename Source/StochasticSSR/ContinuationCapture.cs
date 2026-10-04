@@ -32,7 +32,7 @@ namespace FuckTheseFX.Source.StochasticSSR
             armed=false;pending=true;
             var data=new Dictionary<string,Color[]>();var sizes=new Dictionary<string,Vector2Int>();
             int remaining=targets.Count;bool failed=false;
-            string metadata="Schema=6\nRangeSemantics=CameraToReceiverRadial\nExcludedReceiver=miss_0 (shared with material/depth exclusion)\nRecordGeometryXY=integer camera source cell\n"+replayMetadata+Environment.NewLine+"Camera="+cameraWidth+"x"+cameraHeight+" frame="+Time.frameCount+Environment.NewLine+
+            string metadata="Schema=7\nExcludedReceiver=miss_0 (shared with material/depth exclusion)\nRecordGeometryXY=integer camera source cell\n"+replayMetadata+Environment.NewLine+"Camera="+cameraWidth+"x"+cameraHeight+" frame="+Time.frameCount+Environment.NewLine+
                 string.Join(Environment.NewLine,typeof(Options).GetFields(System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).Select(f=>f.Name+"="+Convert.ToString(f.GetValue(o),CultureInfo.InvariantCulture)));
             foreach(var item in targets) {
                 string name=item.Key;sizes[name]=new Vector2Int(item.Value.width,item.Value.height);

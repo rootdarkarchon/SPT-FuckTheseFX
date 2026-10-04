@@ -95,7 +95,7 @@ namespace FuckTheseFX.Source.StochasticSSR
                 if(owner!=camera){if(owner!=null)Camera.onPreRender-=FinalizeRaster;owner=camera;Camera.onPreRender+=FinalizeRaster;reset=true;}
                 properties.Clear();properties.SetVector("_Size",new Vector4(p.CameraWidth,p.CameraHeight,signal.width,signal.height));
                 properties.SetVector("_Clip",new Vector4(camera.nearClipPlane,camera.farClipPlane,0,0));
-                properties.SetVector("_Eligibility",new Vector4(o.Smoothness,o.LimitNativeRange?1:0,o.Distance,o.ZeroSmoothnessProbe?1:0));
+                properties.SetVector("_Eligibility",new Vector4(o.Smoothness,0,0,o.ZeroSmoothnessProbe?1:0));
                 properties.SetMatrix("_InvProjection",GL.GetGPUProjectionMatrix(camera.projectionMatrix,false).inverse);
                 properties.SetBuffer("_SsrRasterState",p.Raster.Buffer);properties.SetFloat("_SsrLateRaster",p.Raster.Enabled?1:0);
                 properties.SetTexture("_Guide",p.Hit);properties.SetTexture("_Point",p.HitPoint);properties.SetTexture("_Record",p.Record);

@@ -114,7 +114,6 @@ namespace FuckTheseFX.Source.StochasticSSR
             properties.SetVector("_ZeroSmoothnessProbe",new Vector4(o.ZeroSmoothnessProbe?1:0,o.ZeroSmoothnessProbeStrength,0,0));
             properties.SetVector("_ZeroSmoothnessProbeFade",new Vector4(o.ZeroSmoothnessProbeClose,o.ZeroSmoothnessProbeFadeStart,o.ZeroSmoothnessProbeFadeEnd,0));
             properties.SetVector("_ReceiverCutoff",new Vector4(o.SupportSmoothness??o.Smoothness,o.CutoffEnvironmentBlend,0,0));
-            properties.SetVector("_ReceiverRange",new Vector4(o.LimitNativeRange?1:0,o.Distance,0,0));
             properties.SetMatrix("_InvProjection",projection.inverse);properties.SetMatrix("_CameraToWorld",camera.cameraToWorldMatrix);
             properties.SetTexture("_Raw",p.Radiance);properties.SetTexture("_Guide",p.Hit);properties.SetTexture("_Point",p.HitPoint);properties.SetTexture("_Record",p.Record);
             properties.SetTexture("_TraceInfo",p.TraceInfo);properties.SetTexture("_TraceStop",p.TraceStop!=null?(Texture)p.TraceStop:Texture2D.blackTexture);
@@ -169,7 +168,7 @@ namespace FuckTheseFX.Source.StochasticSSR
                 targets.Add("nrd-motion",Nrd.Motion);targets.Add("nrd-display",Nrd.Output);
                 string[] inputNames={"scene-source","gbuffer0","gbuffer1","gbuffer2","motion","water"};
                 for(int k=0;k<replayInputs.Length;k++)targets.Add(inputNames[k],replayInputs[k]);
-                string metadata="Denoiser=NRD_REBLUR_SPECULAR"+"\nDirection=Ggx\nDepthGapFill=ReceiverColourFallback\nSourceBlend=0\nRelaxReturn=True\nSkyAfterContinuation=True\nSkyRecoveryScope="+(o.GlobalContinuedSky?"AllEligible":"Water")+"\nSpatial=False\nHitAware=False\nShallowFade=0\nTraceShape=Square\nReconstruction="+o.Reconstruction+
+                string metadata="Denoiser=NRD_REBLUR_SPECULAR"+"\nDirection=Ggx\nDepthGapFill=ReceiverColourFallback\nSourceBlend=0\nRelaxReturn=True\nSkyAfterContinuation=True\nSkyRecoveryScope=AllEligible\nSpatial=False\nHitAware=False\nShallowFade=0\nTraceShape=Square\nReconstruction="+o.Reconstruction+
                     "\nProjection="+MatrixText(projection)+"\nCameraToWorld="+MatrixText(camera.cameraToWorldMatrix)+
                     "\nPreviousView="+MatrixText(previousView)+"\nPreviousProjection="+MatrixText(GL.GetGPUProjectionMatrix(previousProjection,false))+"\nHistoryValid="+UsedHistory+"\nLastResetReason="+LastResetReason;
                 var rasterSnapshot=p.Raster.Current;

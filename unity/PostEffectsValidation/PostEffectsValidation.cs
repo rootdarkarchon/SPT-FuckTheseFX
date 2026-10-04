@@ -24,7 +24,7 @@ namespace FuckTheseFX
     internal static class Plugin
     {
         internal static TestLog MyLog = new TestLog();
-        internal static Setting<float> PrismExposurePercent = new Setting<float>(100);
+        internal static Setting<int> PrismExposurePercent = new Setting<int>(100);
         internal static Setting<bool> SharpenEnabled = new Setting<bool>(true);
     }
 }
@@ -82,7 +82,7 @@ public static class PostEffectsValidation
         }
     }
 
-    static void Allocation(MethodInfo method, object instance, int width, int height, float percent, int expected)
+    static void Allocation(MethodInfo method, object instance, int width, int height, int percent, int expected)
     {
         var source = new RenderTexture(width,height,0,RenderTextureFormat.ARGBHalf);
         try
@@ -109,13 +109,11 @@ public static class PostEffectsValidation
                 Allocation(method,instance,3840,2160,100,1920);
                 Allocation(method,instance,3840,2160,50,960);
                 Allocation(method,instance,3840,2160,25,480);
-                Allocation(method,instance,2560,1440,37.5f,480);
+                Allocation(method,instance,2560,1440,66,844);
                 Allocation(method,instance,1920,1080,50,480);
                 Allocation(method,instance,101,77,100,50);
                 Allocation(method,instance,101,77,50,25);
                 Allocation(method,instance,64,48,1,1);
-                Allocation(method,instance,64,48,float.NaN,32);
-                Allocation(method,instance,64,48,float.PositiveInfinity,32);
                 Allocation(method,instance,64,48,200,32);
                 Allocation(method,instance,64,48,-10,1);
                 Allocation(method,instance,3840,2160,100,1920);

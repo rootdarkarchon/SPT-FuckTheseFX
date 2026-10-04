@@ -31,10 +31,5 @@ try {
     $redirect = @($wrapper.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.Name -eq 'GetSourceDestination' })
     $render = @($wrapper.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.Name -eq 'OnRenderImageInternal' })
     if ($redirect.Count -ne 1 -or $render.Count -ne 1 -or $redirect[0].Offset -gt $render[0].Offset) { throw 'Bloom source redirection order changed' }
-    $ssaa = $post.MainModule.Types | Where-Object FullName -eq 'SSAA'
-    foreach ($name in @('GetInputWidth', 'GetInputHeight')) {
-        $method = @($ssaa.Methods | Where-Object { $_.Name -eq $name -and $_.Parameters.Count -eq 0 -and $_.ReturnType.FullName -eq 'System.Int32' -and -not $_.IsStatic })
-        if ($method.Count -ne 1) { throw "Missing SSAA.$name contract" }
-    }
-    Write-Output 'Installed bloom contracts verified: post-redirection hook, both original-scene bindings, deferred execution lifetime and SSAA input dimensions.'
+    Write-Output 'Installed bloom contracts verified: post-redirection hook, both original-scene bindings, deferred execution lifetime.'
 } finally { $game.Dispose(); $post.Dispose() }

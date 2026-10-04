@@ -33,7 +33,6 @@ Shader "Hidden/FTFX/StochasticSSR/Reflection"
   float2 _ReceiverCutoff; // native support threshold, excluded-receiver environment blend
   float2 _ZeroSmoothnessProbe; // experimental enabled, far contribution
   float3 _ZeroSmoothnessProbeFade; // close contribution, start metres, end metres
-  float2 _ReceiverRange; // enabled, maximum camera-to-receiver distance in metres
   float4x4 _InvProjection,_CameraToWorld;
   float _ReflectionBottomShade,_SSRFactor;
   float4 _ZBufferParams;
@@ -161,11 +160,6 @@ Shader "Hidden/FTFX/StochasticSSR/Reflection"
    return _CameraGBufferTexture1.Load(int3(pixel,0)).a>=threshold &&
       1/(_ZBufferParams.x*raw+_ZBufferParams.y)<=.999;
   }
-  bool ReceiverInRange(int2 pixel) {
-   if(_ReceiverRange.x<.5)return true;
-   float3 receiver=ViewPosition((pixel+.5)/_Size.xy,_Depth.Load(int3(pixel,0)));
-   return dot(receiver,receiver)<=_ReceiverRange.y*_ReceiverRange.y;
-  }
   bool ZeroSmoothnessProbeReceiver(int2 pixel) {
    if(_ZeroSmoothnessProbe.x<.5)return false;
    float4 spec=_CameraGBufferTexture1.Load(int3(pixel,0));
@@ -173,7 +167,7 @@ Shader "Hidden/FTFX/StochasticSSR/Reflection"
    return all(isfinite(spec)) && spec.a==0 && any(spec.rgb!=0) &&
       !all(encoded==0) && all(isfinite(n)) && dot(n,n)>1e-8 && EligibleAt(pixel,0);
   }
-  bool Eligible(int2 pixel) {return EligibleAt(pixel,_ReflectionOptions.x) && ReceiverInRange(pixel) && !ZeroSmoothnessProbeReceiver(pixel);}
+  bool Eligible(int2 pixel) {return EligibleAt(pixel,_ReflectionOptions.x) && !ZeroSmoothnessProbeReceiver(pixel);}
   bool EnvironmentEligible(int2 pixel) {return EligibleAt(pixel,_ReceiverCutoff.x);}
   float3 Environment(int2 pixel,float3 direction,float3 material) {
    // Exact native final-pass removal, independent of the new reflection signal.

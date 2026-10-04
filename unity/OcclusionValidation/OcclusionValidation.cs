@@ -211,7 +211,7 @@ public static partial class OcclusionValidation
    settings.BentNormals.Value=true;
    foreach(int mode in new[]{0,1,2,3,4,0})
    {
-    settings.Ambient.Value=mode!=1; settings.AmbientStrength.Value=mode==2?0:.6f;
+    settings.Ambient.Value=mode!=1; settings.AmbientStrength.Value=mode==2?0:60;
     settings.BentNormals.Value=mode!=3;
     effect.Record(settings,2,mode!=4);camera.Render();
     var field=typeof(CameraOcclusion).GetField("primary",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);
@@ -247,6 +247,8 @@ public static partial class OcclusionValidation
   {
    integration.Initialize();
    manager.SetSSAO(EFT.Settings.Graphics.ESSAOMode.HighQuality);camera.Render();
+   Require(!settings.Enabled.Value && native1.enabled && native2.enabled && camera.GetCommandBuffers(CameraEvent.BeforeImageEffectsOpaque).Length==0,"disabled-by-default XeGTAO did not retain native AO");
+   settings.Enabled.Value=true;integration.Update();camera.Render();
    Require(!native1.enabled && !native2.enabled && camera.GetCommandBuffers(CameraEvent.BeforeImageEffectsOpaque).Length==1,"replacement does not own AO");
    var bindingsField=typeof(XeGTAOIntegration).GetField("bindings",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);
    foreach(int quality in new[]{0,1,2,3}) foreach(var nativeQuality in new[]{EFT.Settings.Graphics.ESSAOMode.FastestPerformance,EFT.Settings.Graphics.ESSAOMode.HighestQuality})

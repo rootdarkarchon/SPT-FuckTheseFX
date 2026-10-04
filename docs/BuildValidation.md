@@ -46,9 +46,11 @@ Use Python with UnityPy for reference extraction. The extraction verifies the in
 After SSR and water validation, build the runtime package:
 
 ```powershell
-./scripts/Build-Package.ps1 -PackageSuffix '-ssr-cleanup'
+./scripts/Build-Package.ps1
 ```
 
 Packaging builds the managed DLL, runs the FX/configuration/ABI contracts, verifies validated source/bundle identities and checks every ZIP entry's hash. NRD's native DLL and adapter bundle are mandatory package inputs. Runtime packages contain only DLLs, assets and required licenses. The script does not install into the game or publish a release.
+
+Every FuckTheseFX runtime package is written to `bin/Release/FuckTheseFX-<semver>-SPT4.1-<working-tree hash>.zip`, using the verified built plugin version and a deterministic 12-character SHA-256 digest of current tracked and non-ignored untracked file paths and contents. The hash includes uncommitted edits, renames and deletions, excludes ignored build outputs, and is independent of staging state. This exact filename is required for release and testing builds and must be preserved when copying or delivering the ZIP. Custom suffixes and alternative names are prohibited; packaging fails if the working tree cannot be hashed or changes during the build. See [repository instructions](../AGENTS.md).
 
 Validation projects, native oracles and receipts live under ignored `obj/`; packages live under ignored `bin/`. Source changes require fresh relevant validation before packaging. GPU fixtures establish rendering/resource contracts, not live raid appearance or frame-time improvement. Native SSR profiling and the separate research companion remain available for targeted investigations.

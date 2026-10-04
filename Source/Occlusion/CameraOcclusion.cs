@@ -70,8 +70,8 @@ namespace FuckTheseFX.Source.Occlusion
             Active = false; LightingDebugTexture = null; LastQuality = quality;
             capture.Clear(); calculate.Clear(); actors.Clear();
             bool bleedView = settings.View.Value == OcclusionView.ScreenSpaceContactGI || settings.View.Value == OcclusionView.ScreenSpaceContactGIHistory;
-            bool useLive = settings.FoliageLive && mainCamera && camera.allowHDR && ambientAvailable && settings.Ambient.Value && settings.AmbientStrength.Value > 0;
-            bool useFoliage = mainCamera && camera.allowHDR && settings.FoliageExtraAO.Value > 0 &&
+            bool useLive = settings.FoliageLive && mainCamera && camera.allowHDR && ambientAvailable && settings.Ambient.Value && settings.AmbientStrengthFraction > 0;
+            bool useFoliage = mainCamera && camera.allowHDR && settings.FoliageExtraAOFraction > 0 &&
                 (settings.View.Value == OcclusionView.Normal || settings.FoliageCapture || useLive);
             bool requestBleed = settings.Bleed.Enabled.Value && (settings.Bleed.Strength.Value > 0 || bleedView);
             if (!requestBleed) { bleedFailed = false; bleedUnsupportedWarned = false; }
@@ -110,7 +110,7 @@ namespace FuckTheseFX.Source.Occlusion
             composite.SetVector("_AOFade",distanceFade);
             composite.SetVector("_ActorSettings",new Vector4(settings.ActorStrength.Value,settings.ActorResponse.Value,settings.ActorCutoff.Value,0));
             composite.SetVector("_Debug",new Vector4((int)settings.View.Value,settings.DepthStart.Value,settings.DepthRange.Value,0));
-            AmbientActive = ambientAvailable && settings.Ambient.Value && settings.AmbientStrength.Value > 0;
+            AmbientActive = ambientAvailable && settings.Ambient.Value && settings.AmbientStrengthFraction > 0;
             bool reflectionOcclusion = AmbientActive && settings.ReflectionOcclusion.Value;
             composite.SetFloat("_ReflectionOcclusion",reflectionOcclusion ? 1 : 0);
             bool bent = AmbientActive && settings.BentNormals.Value;

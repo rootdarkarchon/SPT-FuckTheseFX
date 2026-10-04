@@ -28,7 +28,6 @@ Shader "Hidden/FTFX/StochasticSSR/NrdInputs" {
     float3 receiver=h.xyz*(g.y/-h.z);
     bool eligible=g.y>_Clip.x && g.y<_Clip.y*.999 && spec.a>=_Eligibility.x &&
        !all(encoded==0) && dot(original,original)>1e-8 && all(isfinite(g)) && all(isfinite(spec)) && all(isfinite(encoded)) && all(isfinite(endpoint));
-    if(_Eligibility.y>0 && length(receiver)>_Eligibility.z)eligible=false;
     if(_Eligibility.w>0 && spec.a==0 && any(spec.rgb!=0))eligible=false;
     float hit=record.w==1?length(endpoint.xyz-receiver):(record.w==2?65504:0);
     float raw=_CameraDepthTexture.Load(int3(p,0)),eye=rcp(_ZBufferParams.z*raw+_ZBufferParams.w);

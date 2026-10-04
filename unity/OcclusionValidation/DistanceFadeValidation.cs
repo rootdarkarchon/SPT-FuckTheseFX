@@ -60,7 +60,7 @@ public static partial class OcclusionValidation
   using(var first=new CameraOcclusion(camera,assets))
   using(var second=new CameraOcclusion(optic,assets))
   {
-   settings.Actors.Value=false;settings.Ambient.Value=true;settings.AmbientStrength.Value=1;
+   settings.Actors.Value=false;settings.Ambient.Value=true;settings.AmbientStrength.Value=100;
    for(int iteration=0;iteration<2;iteration++)
    {
     settings.FadeStart.Value=iteration==0?35:60;settings.FadeEnd.Value=iteration==0?100:150;

@@ -74,8 +74,8 @@ namespace FuckTheseFX.Source.Occlusion
                     else material.DisableKeyword("FTFX_FOLIAGE_CAPTURE");
                     if(self.settings.BentNormals.Value) material.EnableKeyword("FTFX_BENT_NORMALS");
                     else material.DisableKeyword("FTFX_BENT_NORMALS");
-                    material.SetFloat("_FTFX_CAAmount",self.settings.AmbientStrength.Value);
-                    material.SetFloat("_FTFX_CA_FoliageStrength",self.settings.Foliage.Value);
+                    material.SetFloat("_FTFX_CAAmount",self.settings.AmbientStrengthFraction);
+                    material.SetFloat("_FTFX_CA_FoliageStrength",self.settings.FoliageFraction);
                 }
                 else { material.DisableKeyword("FTFX_SURFACE_CAPTURE"); material.DisableKeyword("FTFX_FOLIAGE_CAPTURE"); material.DisableKeyword("FTFX_BENT_DIAGNOSTICS"); material.DisableKeyword("FTFX_BENT_NORMALS"); material.shader = original; }
             }

@@ -27,22 +27,16 @@ try {
  }
  $type=$plugin.MainModule.Types | Where-Object FullName -eq 'FuckTheseFX.Plugin'
  if($type.CustomAttributes | Where-Object { $_.AttributeType.Name -eq 'BepInIncompatibility' -and $_.ConstructorArguments[0].Value -eq 'com.matsix.sptaoreplacer' }) { throw 'General AOReplacer incompatibility is forbidden' }
- $soft=$type.CustomAttributes | Where-Object { $_.AttributeType.Name -eq 'BepInDependency' -and $_.ConstructorArguments[0].Value -eq 'com.matsix.sptaoreplacer' }
- if(-not $soft -or $soft.ConstructorArguments[1].Value -ne 2) { throw 'Missing AOReplacer soft load ordering' }
+ if($type.CustomAttributes | Where-Object { $_.AttributeType.Name -eq 'BepInDependency' -and $_.ConstructorArguments[0].Value -eq 'com.matsix.sptaoreplacer' }) { throw 'Removed AOReplacer dependency remains' }
  $awake=$type.Methods | Where-Object Name -eq 'Awake'
  $ops=$awake.Body.Instructions
- $guard=@($ops | Where-Object { $_.OpCode.Name -eq 'ldstr' -and $_.Operand -eq 'com.matsix.sptaoreplacer' })
- if($guard.Count -ne 1) { throw 'Missing installed-plugin guard' }
- $i=$ops.IndexOf($guard[0])
- if($ops[$i+1].Operand.Name -ne 'ContainsKey' -or $ops[$i+2].OpCode.Name -notmatch '^brfalse') { throw 'AOReplacer presence does not guard AO initialization' }
- $disabledStart=$i+3
- $enabledStart=$ops.IndexOf($ops[$i+2].Operand)
- if($enabledStart -le $disabledStart) { throw 'Unexpected guard flow' }
- if(@($ops | Select-Object -Skip $disabledStart -First ($enabledStart-$disabledStart) | Where-Object { $_.OpCode.Name -eq 'newobj' }).Count) { throw 'AO resources initialized despite AOReplacer' }
- if($ops[$enabledStart-1].OpCode.Name -ne 'ret') { throw 'AOReplacer guard does not return before AO initialization' }
+ if($ops | Where-Object { $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.DeclaringType.FullName -eq 'BepInEx.Bootstrap.Chainloader' }) { throw 'Removed installed-plugin AO guard remains' }
+ if(-not ($ops | Where-Object { $_.OpCode.Name -eq 'newobj' -and $_.Operand.DeclaringType.Name -eq 'XeGTAOIntegration' })) { throw 'AO initialization missing' }
+ $bloom=$plugin.MainModule.Types | Where-Object Name -eq 'BloomResolutionIntegration'
+ if(($bloom.Methods | Where-Object Name -eq 'Initialize').Body.Instructions | Where-Object { $_.OpCode.Name -eq 'ldstr' -and $_.Operand -eq 'com.matsix.sptaoreplacer.bloom-resolution' }) { throw 'Removed older AOReplacer bloom guard remains' }
  if($plugin.MainModule.Types | Where-Object FullName -match 'AmplifyGTAO|AmplifyOcclusion') { throw 'Amplify implementation leaked into FTFX' }
  if($type.Methods | Where-Object Name -eq 'ImportLegacySettings') { throw 'Legacy import remains' }
- Write-Output 'Verified installed AO/ambient/stencil ABI, soft load ordering, complete AO bypass when AOReplacer is present, and no settings import.'
+ Write-Output 'Verified installed AO/ambient/stencil ABI, AO initialization without AOReplacer gates, bloom ownership gate removal, and no settings import.'
 } finally { $game.Dispose();$plugin.Dispose();$resolver.Dispose() }
 $hash=(Get-FileHash (Join-Path $SptInstallPath 'EscapeFromTarkov_Data\StreamingAssets\Windows\shaders')).Hash
 if($hash -ne 'D41092507FC8CADCDC3DB1D53B9F1E0CB9FC7061AD07FF3C980284731AE2091C') { throw 'Unsupported native ambient shader bundle' }

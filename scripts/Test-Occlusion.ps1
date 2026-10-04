@@ -8,6 +8,7 @@ Copy-Item (Join-Path $repo 'unity\Assets\CustomAmbient.shader') (Join-Path $proj
 Copy-Item (Join-Path $repo 'Source\Occlusion\*.cs') (Join-Path $project 'Assets\Editor') -Force
 Remove-Item -LiteralPath (Join-Path $project 'Assets/Editor/AmbientReflectionCapture.cs') -Force -ErrorAction SilentlyContinue
 Copy-Item (Join-Path $repo 'Source\StochasticSSR\AmbientSurfaceCapture.cs') (Join-Path $project 'Assets\Editor') -Force
+Copy-Item (Join-Path $repo 'SettingsCatalog.cs') (Join-Path $project 'Assets/Editor') -Force
 Copy-Item (Join-Path $repo 'ConfigurationManagerAttributes.cs') (Join-Path $project 'Assets\Editor') -Force
 Copy-Item (Join-Path $repo 'unity\OcclusionValidation\*.cs') (Join-Path $project 'Assets\Editor') -Force
 Copy-Item (Join-Path $repo 'unity\OcclusionValidation\*.shader') (Join-Path $project 'Assets\Editor') -Force

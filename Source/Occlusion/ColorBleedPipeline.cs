@@ -106,7 +106,7 @@ namespace FuckTheseFX.Source.Occlusion
             material.SetVector("_CBNDCToView", new Vector4(2/projection.m00,-2/projection.m11,(projection.m02-1)/projection.m00,(1-projection.m12)/projection.m11));
             material.SetMatrix("_CBWorldToView", camera.worldToCameraMatrix);
             material.SetVector("_CBSettings",new Vector4(settings.Radius.Value,settings.Strength.Value,settings.DepthTolerance.Value,settings.Distance.Value));
-            material.SetVector("_CBLimits",new Vector4(settings.DonorLimit.Value,settings.BounceLimit.Value,div,settings.Samples.Value));
+            material.SetVector("_CBLimits",new Vector4(settings.DonorLimit.Value,settings.BounceFraction,div,settings.Samples.Value));
             float near = camera.nearClipPlane, far = camera.farClipPlane;
             material.SetVector("_CBDepthUnpack", SystemInfo.usesReversedZBuffer
                 ? new Vector4(-near*far/(far-near),-near/(far-near),far,0)

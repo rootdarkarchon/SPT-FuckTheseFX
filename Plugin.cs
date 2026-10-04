@@ -16,19 +16,17 @@ using FuckTheseFX.Source.PostEffects;
 namespace FuckTheseFX
 {
     [BepInPlugin(Guid, "Fuck These FX", Version)]
-    [BepInDependency("com.matsix.sptaoreplacer", BepInDependency.DependencyFlags.SoftDependency)]
-    [BepInDependency(StochasticSsrIntegration.SsrsixGuid, BepInDependency.DependencyFlags.SoftDependency)]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Guid = "com.rootdarkarchon.fuckthesefx";
         public const string Version = "1.7.0";
         internal static ManualLogSource MyLog;
-        internal static ConfigEntry<bool> AmbientHighlightEnabled, BloomUseNativeResolution, DistantShadowSamplingEnabled;
-        internal static ConfigEntry<bool> BloomEnabled, DistantShadowsEnabled;
+        internal static ConfigEntry<bool> AmbientHighlightEnabled, DistantShadowSamplingEnabled;
+        internal static ConfigEntry<bool> DistantShadowsEnabled;
         internal static ConfigEntry<bool> VintageEnabled;
         internal static ConfigEntry<bool> GlassCullingEnabled;
-        internal static ConfigEntry<float> BloomInputScale;
-        internal static ConfigEntry<float> PrismExposurePercent;
+        internal static ConfigEntry<int> BloomInputScale;
+        internal static ConfigEntry<int> PrismExposurePercent;
         internal static ConfigEntry<bool> SharpenEnabled;
         internal static ConfigEntry<bool> SkipInactiveEffects;
         internal static ConfigEntry<DistantShadowMaskResolution> DistantShadowResolution;
@@ -77,107 +75,45 @@ namespace FuckTheseFX
             FeatureStartup.TryInitialize("Bloom", bloom.Initialize);
             FeatureStartup.TryInitialize("Distant shadow sampling", () => sampling.Initialize(Info.Location));
             FeatureStartup.TryInitialize("Distant shadow resolution", resolution.Initialize);
-            if (BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey("com.matsix.sptaoreplacer"))
-                Logger.LogInfo("AOReplacer is installed: FuckTheseFX XeGTAO, actor AO, CustomAmbient and Screen Space Contact GI are bypassed. Other FX remain active.");
-            else
-            {
-                occlusion = new XeGTAOIntegration(Info.Location, Occlusion);
-                FeatureStartup.TryInitialize("XeGTAO", occlusion.Initialize);
-            }
+            occlusion = new XeGTAOIntegration(Info.Location, Occlusion);
+            FeatureStartup.TryInitialize("XeGTAO", occlusion.Initialize);
         }
 
+        internal static SettingsCatalog Settings;
         internal static void BindSettings(ConfigFile config)
         {
-            RemoveRetiredSettings(config);
-            GlassCullingEnabled = BindGlassCulling(config);
-            AmbientHighlightEnabled = config.Bind("Ambient Highlight", "Enabled", false,
-                "When enabled uses vanilla Tarkovs behavior: Adds extra ambient brightness to weapons, hands and selected objects. Off removes this artificial glow. Performance: no measurable impact.");
-            VintageEnabled = config.Bind("Vintage Filter", "Enabled", false,
-                "Off disables the vintage camera filter. On restores effects disabled by Fuck These FX. Performance: no measurable impact.");
-            SharpenEnabled = config.Bind("Sharpen Filter", "Enabled", true,
-                "On retains Tarkov's CC_Sharpen filter. Off removes the filter, including its combined desaturation. Applies live; enabling restores only effects disabled by Fuck These FX.");
-            SkipInactiveEffects = config.Bind("Inactive Effects", "Skip neutral passes", true,
-                "Skips neutral status-effect copies inside the active upscaler image chain. Zero-aperture disc DoF retains its native alpha/CoC pass and skips blur/compositing. Active effects and ordinary rendering retain native behavior. Applies live.");
-            PrismExposurePercent = config.Bind("Prism Exposure", "Resolution percent", 100f,
-                new ConfigDescription("Side length of the square exposure sampling grid as a percentage of the game's original half-width grid. At 4K: 100% = 1920x1920, 50% = 960x960. Lower values reduce exposure sampling detail; scene sharpness and tone-mapping resolution are unchanged. 100% retains native behavior.", new AcceptableValueRange<float>(1f, 100f)));
-            BloomEnabled = config.Bind("Ultimate Bloom", "Enabled", true,
-                "Adjusts bloom and lens-flare detail. Off keeps the game's original bloom. Performance: positive impact when reducing input scale.");
-            BloomInputScale = config.Bind("Ultimate Bloom", "Bloom input scale", .67f,
-                new ConfigDescription("Lower values make glow and flares softer and less detailed while keeping the scene sharp. Ignored with native resolution enabled.", new AcceptableValueRange<float>(.25f, 1f)));
-            BloomUseNativeResolution = config.Bind("Ultimate Bloom", "Use native resolution", false,
-                "Matches glow and flare detail to the game's resolution before DLSS/FSR upscaling, overriding the scale slider.");
-            DistantShadowsEnabled = config.Bind("Distant Shadows", "Enabled", true,
-                "Adjusts distant shadow detail and smoothing. Off keeps the game's original distant shadows. Performance: small impact at defaults.");
-            DistantShadowResolution = config.Bind("Distant Shadows", "Resolution", Source.DistantShadows.DistantShadowMaskResolution.Half,
-                "Higher resolutions sharpen distant shadow edges; lower resolutions look softer.");
-            if (!System.Enum.IsDefined(typeof(Source.DistantShadows.DistantShadowMaskResolution), DistantShadowResolution.Value))
-                DistantShadowResolution.Value = Source.DistantShadows.DistantShadowMaskResolution.Half;
-            DistantShadowSamplingEnabled = BindAdvanced(config, "Distant Shadows", "Adjust filter samples", true,
-                "Uses the sample counts below. Off restores the game's shadow filtering.");
-            DistantShadowQuarterSamples = BindAdvanced(config, "Distant Shadows", "Quarter filter samples", 25,
-                new ConfigDescription("More samples smooth quarter-resolution shadow edges and reduce flicker. 25 uses native filtering.", new AcceptableValueRange<int>(1, 25)));
-            DistantShadowHalfSamples = BindAdvanced(config, "Distant Shadows", "Half filter samples", 12,
-                new ConfigDescription("More samples smooth half-resolution shadow edges and reduce flicker. 25 uses native filtering.", new AcceptableValueRange<int>(1, 25)));
-            DistantShadowFullSamples = BindAdvanced(config, "Distant Shadows", "Full filter samples", 8,
-                new ConfigDescription("More samples smooth full-resolution shadow edges and reduce flicker. 25 uses native filtering.", new AcceptableValueRange<int>(1, 25)));
-            Occlusion = new OcclusionSettings(config);
-            Ssr = new SsrSettings(config);
-            WaterSurface = config.Bind("Water Surface", "Mode", WaterSurfaceMode.Native,
-                "Native keeps Tarkov water. FTFX uses broader, slower waves and gentler fine ripples on Customs, including optics. Other maps and water families remain native.");
-            WaterSurfaceDiagnosticTint = config.Bind("Water Surface", "Show replacement tint", false,
-                "Colors FTFX water bright magenta to confirm that the replacement is visible. Native stays normal. Turn off after checking the switch.");
-            WaterSurfaceSize = config.Bind("Water Surface", "Surface size", 1f,
-                new ConfigDescription("FTFX only. Larger values spread the surface patterns over a larger area. 1 uses the phase 2 default.", new AcceptableValueRange<float>(.25f,4f)));
-            WaterSurfaceStrength = config.Bind("Water Surface", "Surface strength", 1f,
-                new ConfigDescription("FTFX only. Strength of the surface normal variation. 0 flattens it; native rain ripples remain active. 1 uses the phase 2 default.", new AcceptableValueRange<float>(0f,2f)));
-            WaterFineRippleStrength = config.Bind("Water Surface", "Fine ripple strength", 1f,
-                new ConfigDescription("FTFX only. Strength of fine detail relative to the broader patterns. 0 removes fine detail. 1 uses the restrained phase 2 default.", new AcceptableValueRange<float>(0f,4f)));
-            WaterAnimationSpeed = config.Bind("Water Surface", "Animation speed", 1f,
-                new ConfigDescription("FTFX only. Surface pattern movement speed. Changes preserve the current pattern position; 0 freezes it in place. Native foam and rain still animate. 1 uses the phase 2 default.", new AcceptableValueRange<float>(0f,2f)));
+            var catalog = new SettingsCatalog(config);
+            catalog.BindPresets();
+            catalog.BindSection<bool>(SettingsCatalog.Vanilla);
+            catalog.BindSection<bool>(SettingsCatalog.XeGTAO);
+            catalog.BindSection<bool>(SettingsCatalog.ContactGI);
+            catalog.BindSection<bool>(SettingsCatalog.SSR);
+            catalog.BindSection<WaterSurfaceMode>(SettingsCatalog.Water);
+            catalog.BindSection<OcclusionView>(SettingsCatalog.Debug);
+            GlassCullingEnabled = catalog.Bind<bool>(SettingsCatalog.Vanilla, "Streets of Tarkov Glass Culling Fix");
+            AmbientHighlightEnabled = catalog.Bind<bool>(SettingsCatalog.Vanilla, "Additional Ambient Highlight");
+            VintageEnabled = catalog.Bind<bool>(SettingsCatalog.Vanilla, "Vintage Filter");
+            SharpenEnabled = catalog.Bind<bool>(SettingsCatalog.Vanilla, "Sharpen Filter");
+            SkipInactiveEffects = catalog.Bind<bool>(SettingsCatalog.Vanilla, "Skip Neutral Effects Passes");
+            PrismExposurePercent = catalog.Bind<int>(SettingsCatalog.Vanilla, "Prism Auto Exposure Resolution (%)");
+            BloomInputScale = catalog.Bind<int>(SettingsCatalog.Vanilla, "Ultimate Bloom Input Scale (%)");
+            DistantShadowsEnabled = catalog.Bind<bool>(SettingsCatalog.Vanilla, "Distant Shadows Resolution Fix");
+            DistantShadowResolution = catalog.Bind<DistantShadowMaskResolution>(SettingsCatalog.Vanilla, "Distant Shadows Resolution");
+            DistantShadowSamplingEnabled = catalog.Bind<bool>(SettingsCatalog.Vanilla, "Distant Shadows Adjust Filter Samples");
+            DistantShadowQuarterSamples = catalog.Bind<int>(SettingsCatalog.Vanilla, "Distant Shadows Quarter Filter Samples");
+            DistantShadowHalfSamples = catalog.Bind<int>(SettingsCatalog.Vanilla, "Distant Shadows Half Filter Samples");
+            DistantShadowFullSamples = catalog.Bind<int>(SettingsCatalog.Vanilla, "Distant Shadows Full Filter Samples");
+            WaterSurface = catalog.Bind<WaterSurfaceMode>(SettingsCatalog.Water, "Mode");
+            WaterSurfaceDiagnosticTint = catalog.Bind<bool>(SettingsCatalog.Water, "Show replacement tint");
+            WaterSurfaceSize = catalog.Bind<float>(SettingsCatalog.Water, "Surface size");
+            WaterSurfaceStrength = catalog.Bind<float>(SettingsCatalog.Water, "Surface strength");
+            WaterFineRippleStrength = catalog.Bind<float>(SettingsCatalog.Water, "Fine ripple strength");
+            WaterAnimationSpeed = catalog.Bind<float>(SettingsCatalog.Water, "Animation speed");
+            Occlusion = new OcclusionSettings(catalog);
+            Ssr = new SsrSettings(catalog);
+            catalog.ValidateBindings();
+            Settings = catalog;
         }
-
-        private static void RemoveRetiredSettings(ConfigFile config)
-        {
-            bool save = config.SaveOnConfigSet;
-            config.SaveOnConfigSet = false;
-            try
-            {
-                // Bind/remove also consumes orphaned entries saved by retired experiments.
-                config.Remove(config.Bind("Debug", "Foliage live extra AO", "").Definition);
-                foreach (var key in new[] { "Stationary geometry and decals", "Experimental shadow culling" })
-                    config.Remove(config.Bind("Scene Culling", key, "").Definition);
-            }
-            finally { config.SaveOnConfigSet = save; if (save) config.Save(); }
-        }
-
-        private static ConfigEntry<bool> BindGlassCulling(ConfigFile config)
-        {
-            if (config.TryGetEntry<bool>("Glass Culling Fix", "Enabled", out var existing)) return existing;
-            // Read both names before removing the legacy key; a saved new preference takes priority.
-            bool save = config.SaveOnConfigSet;
-            config.SaveOnConfigSet = false;
-            try
-            {
-                var legacy = config.Bind("Glass Culling", "Enabled", "");
-                string oldValue = legacy.Value;
-                config.Remove(legacy.Definition);
-                var current = config.Bind("Glass Culling Fix", "Enabled", "");
-                string newValue = current.Value;
-                config.Remove(current.Definition);
-                var entry = config.Bind("Glass Culling Fix", "Enabled", true,
-                    "Only active on Streets of Tarkov. Makes omitted glass follow native culling of vehicle parts, windows and enclosing building sections to improve performance. Inactive on all other maps. Off restores normal glass rendering.");
-                if (bool.TryParse(newValue, out bool value) || bool.TryParse(oldValue, out value)) entry.Value = value;
-                return entry;
-            }
-            finally { config.SaveOnConfigSet = save; if (save) config.Save(); }
-        }
-
-        private static ConfigEntry<T> BindAdvanced<T>(ConfigFile config, string section, string key, T value, string description) =>
-            BindAdvanced(config, section, key, value, new ConfigDescription(description));
-
-        private static ConfigEntry<T> BindAdvanced<T>(ConfigFile config, string section, string key, T value, ConfigDescription description) =>
-            config.Bind(section, key, value, new ConfigDescription(description.Description, description.AcceptableValues,
-                new ConfigurationManagerAttributes { IsAdvanced = true }));
 
         private void Update()
         {

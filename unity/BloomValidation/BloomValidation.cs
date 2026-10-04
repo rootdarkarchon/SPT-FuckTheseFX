@@ -22,9 +22,7 @@ namespace FuckTheseFX
     internal static class Plugin
     {
         internal static TestLog MyLog = new TestLog();
-        internal static Setting<bool> BloomEnabled = new Setting<bool>(true);
-        internal static Setting<float> BloomInputScale = new Setting<float>(1);
-        internal static Setting<bool> BloomUseNativeResolution = new Setting<bool>(false);
+        internal static Setting<int> BloomInputScale = new Setting<int>(100);
     }
 }
 
@@ -103,10 +101,10 @@ public static class BloomValidation
         if (!value) throw new Exception("FAIL: " + message);
         checks++; Debug.Log("PASS: " + message);
     }
-    private static void Policy(int w, int h, float scale, bool native, int nw, int nh, int ew, int eh)
+    private static void Policy(int w, int h, float scale, int ew, int eh)
     {
-        BloomResolutionPolicy.Resolve(w,h,scale,native,nw,nh,out int rw,out int rh);
-        Require(rw == ew && rh == eh, $"Policy {w}x{h}, scale {scale}, native {native} => {ew}x{eh}");
+        BloomResolutionPolicy.Resolve(w,h,scale,out int rw,out int rh);
+        Require(rw == ew && rh == eh, $"Policy {w}x{h}, scale {scale} => {ew}x{eh}");
     }
     private static Color[] Read(RenderTexture rt)
     {
@@ -131,19 +129,15 @@ public static class BloomValidation
     private static void RunChecks()
     {
         Require(SystemInfo.graphicsDeviceType == GraphicsDeviceType.Direct3D11, "D3D11 rendering");
-        Policy(3840,2160,.5f,false,0,0,1920,1080);
-        Policy(3840,2160,1f,false,0,0,3840,2160);
-        Policy(3840,2160,.5f,true,2560,1440,2560,1440);
-        Policy(3840,2160,1f,true,1280,720,1280,720);
-        Policy(3840,2160,.5f,true,0,0,3840,2160);
-        Policy(1920,1080,.5f,true,3840,2160,1920,1080);
-        Policy(101,77,.5f,false,0,0,51,39);
-        Policy(1,1,.5f,false,0,0,1,1);
-        Policy(64,64,float.NaN,false,0,0,64,64);
-        Policy(64,64,.1f,false,0,0,16,16);
-        Policy(3840,2160,.25f,false,0,0,960,540);
-        Policy(100,100,.67f,false,0,0,67,67);
-        Policy(64,64,2f,false,0,0,64,64);
+        Policy(3840,2160,.5f,1920,1080);
+        Policy(3840,2160,1f,3840,2160);
+        Policy(101,77,.5f,51,39);
+        Policy(1,1,.5f,1,1);
+        Policy(64,64,float.NaN,64,64);
+        Policy(64,64,.1f,16,16);
+        Policy(3840,2160,.25f,960,540);
+        Policy(100,100,.67f,67,67);
+        Policy(64,64,2f,64,64);
         var shader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/BloomFixture.shader");
         if (shader != null) foreach (var message in ShaderUtil.GetShaderMessages(shader)) Debug.Log(message.message);
         Require(shader != null && !ShaderUtil.ShaderHasError(shader), "Fixture shader compiles");
@@ -185,10 +179,10 @@ public static class BloomValidation
             foreach (bool deferred in new[] {false,true})
             {
                 bloom.Deferred = deferred;
-                FuckTheseFX.Plugin.BloomInputScale.Value = 1;
+                FuckTheseFX.Plugin.BloomInputScale.Value = 100;
                 bloom.OnRenderImageInternal(source,output);
                 Require(ReferenceEquals(bloom.LastInput,source) && Difference(baseline,Read(output))<.001, $"{deferred}: 1.0 uses original input and output");
-                FuckTheseFX.Plugin.BloomInputScale.Value = .5f;
+                FuckTheseFX.Plugin.BloomInputScale.Value = 50;
                 bloom.OnRenderImageInternal(source,output);
                 Require(bloom.InputWidth==32 && bloom.InputHeight==24, $"{deferred}: reduced input dimensions");
                 Require(output.width==64 && output.height==48 && Difference(baseline,Read(output))<.001, $"{deferred}: full-resolution high-frequency scene preserved");
@@ -197,27 +191,16 @@ public static class BloomValidation
                 var bright = Read(output);
                 Require(bright.Average(c=>c.r)-baseline.Average(c=>c.r)>.05, $"{deferred}: reduced bloom contributes after deferred execution");
                 Require(Difference(untouched,Read(source))<.00001, $"{deferred}: original source unchanged");
-                FuckTheseFX.Plugin.BloomEnabled.Value = false;
-                FuckTheseFX.Plugin.BloomUseNativeResolution.Value = true;
+                FuckTheseFX.Plugin.BloomInputScale.Value = 100;
                 bloom.OnRenderImageInternal(source,output);
-                Require(ReferenceEquals(bloom.LastInput,source) && Read(output).Average(c=>c.r)-baseline.Average(c=>c.r)>.05, $"{deferred}: disabled adjustments preserve native bloom and original input");
-                FuckTheseFX.Plugin.BloomEnabled.Value = true;
-                FuckTheseFX.Plugin.BloomUseNativeResolution.Value = false;
-                FuckTheseFX.Plugin.BloomInputScale.Value = .25f;
+                Require(ReferenceEquals(bloom.LastInput,source), $"{deferred}: 100% restores original input");
+                FuckTheseFX.Plugin.BloomInputScale.Value = 25;
                 bloom.Passthrough=true;
                 bloom.OnRenderImageInternal(source,output);
                 Require(bloom.InputWidth==16 && bloom.InputHeight==12 && Difference(baseline,Read(output))<.001, $"{deferred}: quarter input keeps full scene detail");
-                FuckTheseFX.Plugin.BloomUseNativeResolution.Value = true;
+                FuckTheseFX.Plugin.BloomInputScale.Value = 67;
                 bloom.OnRenderImageInternal(source,output);
-                Require(bloom.InputWidth==40 && bloom.InputHeight==32 && Difference(baseline,Read(output))<.001, $"{deferred}: internal dimensions override slider");
-                ssaa.InputWidth=24; ssaa.InputHeight=16;
-                bloom.OnRenderImageInternal(source,output);
-                Require(bloom.InputWidth==24 && bloom.InputHeight==16, $"{deferred}: native resolution can override below slider minimum");
-                ssaa.enabled=false;
-                bloom.OnRenderImageInternal(source,output);
-                Require(ReferenceEquals(bloom.LastInput,source), $"{deferred}: inactive upscaler ignores slider and keeps full input");
-                ssaa.enabled=true; ssaa.InputWidth=40; ssaa.InputHeight=32;
-                FuckTheseFX.Plugin.BloomUseNativeResolution.Value=false;
+                Require(bloom.InputWidth==43 && bloom.InputHeight==32, $"{deferred}: default 67% scales exactly once");
             }
             var innerOwner = new GameObject("Nested bloom camera");
             var inner = innerOwner.AddComponent<UltimateBloom>(); inner.Init(shader); inner.Passthrough=true; inner.Deferred=true;

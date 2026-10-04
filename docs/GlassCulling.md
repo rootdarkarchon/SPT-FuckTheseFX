@@ -1,6 +1,6 @@
 # Glass Culling Fix
 
-**F12 > Fuck These FX > Glass Culling Fix > Enabled** is on by default and active only on Streets of Tarkov. It stays inactive on every other map, where relevant performance gains have not been demonstrated. Existing saved preferences migrate from the old Glass Culling section; an existing new-name preference takes priority. It applies to the known `Global Fog/Transparent Reflective Specular` population on vehicles and buildings, without object-name or distance rules. AOReplacer does not bypass this feature.
+**F12 > Fuck These FX > 1. Vanilla Optimizations > Streets of Tarkov Glass Culling Fix** is on by default and active only on Streets of Tarkov. It stays inactive on every other map, where relevant performance gains have not been demonstrated. It applies to the known `Global Fog/Transparent Reflective Specular` population on vehicles and buildings, without object-name or distance rules.
 
 ## What the installed manager does
 

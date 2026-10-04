@@ -2,7 +2,7 @@
 
 ## Implemented controls
 
-`Prism Exposure / Resolution percent` defaults to **100**, with a continuous **1–100** range. It scales each side of Prism's first square exposure texture. For the normal post-DLSS input, the native side is `source.width / 2`, where SSAA has already substituted the final output texture. At 3840×2160 output:
+`1. Vanilla Optimizations / Prism Auto Exposure Resolution (%)` defaults to **66**, with an integer **1–100** range. It scales each side of Prism's first square exposure texture. For the normal post-DLSS input, the native side is `source.width / 2`, where SSAA has already substituted the final output texture. At 3840×2160 output:
 
 | Setting | Exposure texture | Pixels relative to native |
 | --- | --- | --- |
@@ -16,11 +16,11 @@ Only the first `RenderTexture.GetTemporary(int,int,int,RenderTextureFormat)` in 
 
 The patch checks the exact installed allocation instructions and refuses an incompatible method. Feature startup reports the failure while other FTFX features can initialize. The setting applies at the next exposure allocation and requires no restart.
 
-`Sharpen Filter / Enabled` defaults to **true**. False disables the `CC_Sharpen` component and removes its camera image pass. True restores only components FTFX disabled, leaving components that were already disabled alone. Setting changes, scene loads, and camera pre-cull handle live toggles and newly created cameras. Disposal removes subscriptions and restores owned components.
+`1. Vanilla Optimizations / Sharpen Filter` defaults to **true**. False disables the `CC_Sharpen` component and removes its camera image pass. True restores only components FTFX disabled, leaving components that were already disabled alone. Setting changes, scene loads, and camera pre-cull handle live toggles and newly created cameras. Disposal removes subscriptions and restores owned components.
 
 CC_Sharpen also combines health/weather/mask desaturation when `DoDesaturate` is enabled. Turning this component off bypasses that combined behavior as well as sharpening; it does not move desaturation to another shader. The existing standalone `DesaturateEffect` state is left under the game's control.
 
-`Inactive Effects / Skip neutral passes` defaults to **true** and applies live. It removes the five neutral status-effect copies in a confirmed current-frame SSAA output chain. For zero-aperture disc DoF it exits after the native CoC write, before temporary allocations and blur/composite passes. Setting false restores those native passes. No game shader is rewritten or distributed.
+`1. Vanilla Optimizations / Skip Neutral Effects Passes` defaults to **true** and applies live. It removes the five neutral status-effect copies in a confirmed current-frame SSAA output chain. For zero-aperture disc DoF it exits after the native CoC write, before temporary allocations and blur/composite passes. Setting false restores those native passes. No game shader is rewritten or distributed.
 
 ## Evidence and measurement boundaries
 
@@ -87,19 +87,19 @@ Neutral status effects consequently issue **no copy or effect draw in the eligib
 
 ## Validation and live test
 
-Release build and configuration validation cover the 99 current settings, defaults/ranges, nondefault saved values, repeated binding and installed-config preservation. `scripts/Test-PostEffectsContracts.ps1` checks Prism/sharpen, the three native module identities, five status wrapper handoffs, pure SSAA getters/final consumer, and the exact DoF CoC-to-disc-allocation boundary.
+Release build and configuration validation cover the 94 real settings plus one preset row, defaults/ranges, nondefault saved values, repeated binding, current-layout persistence, and both presets. `scripts/Test-PostEffectsContracts.ps1` checks Prism/sharpen, the three native module identities, five status wrapper handoffs, pure SSAA getters/final consumer, and the exact DoF CoC-to-disc-allocation boundary.
 
-`scripts/Test-PostEffects.ps1` runs **63 checks** in Unity 2022.3.43f1 on D3D11/RTX 4090. It imports the actual installed exposure allocation IL into a small fixture, patches it with the production integration, and observes real Unity temporary textures. Checks cover native 100%, 50%, fractional percentages, other input sizes, rounding/minimum, invalid values, live setting changes, unsupported-method rejection and unpatching. Sharpen component fixtures cover selective restoration, native re-enabling, late cameras, destroyed objects and unsubscribing on disposal. These tests do not execute the complete EFT shaders or establish live exposure appearance/GPU savings.
+`scripts/Test-PostEffects.ps1` runs **57 checks** in Unity 2022.3.43f1 on D3D11/RTX 4090. It imports the actual installed exposure allocation IL into a small fixture, patches it with the production integration, and observes real Unity temporary textures. Checks cover native 100%, 50%, integer 66%, other input sizes, rounding/minimum, invalid values, live setting changes, unsupported-method rejection and unpatching. Sharpen component fixtures cover selective restoration, native re-enabling, late cameras, destroyed objects and unsubscribing on disposal. These tests do not execute the complete EFT shaders or establish live exposure appearance/GPU savings.
 
 `scripts/Test-InactiveEffects.ps1` runs **537 checks** on the same runtime/GPU. The SSAA getter/release bodies are imported from installed IL into callback surrogates; status wrappers use verified native predicates with a validation-only shader for active-pass ordering. All 32 status combinations in both HDR and LDR match the original copy chain, with no copies in eligible neutral paths. It covers activation, eye closing independent of fade, blood timeout equality, unordered/NaN comparisons, clamp mutation, continued distortion pre-cull, HDR-to-LDR transition, missing/disabled/closed/stale chains, ordinary Unity-chain copying, and owner-only unpatching. Actual Unity camera callbacks validate proxy-target binding without unwritten-output diagnostics.
 
 For DoF, the installed compiled shader runs unchanged in a surrogate of its disc sequence. Native disc output is compared in **RGBA** against the single-CoC exit for both high/low resolution, HDR/LDR, and a depth/focal-distance/focal-size sweep. The reduced path creates no disc temporaries, executes no blur/composite draw, and retains zero CoC alpha. Positive aperture immediately resumes allocation, and unsupported conditions retain the native path. This establishes fixture output equivalence, not complete in-game camera/effect/lifecycle acceptance or live GPU savings. Extracted game shader assets remain under ignored `obj/` and are excluded from the package.
 
-1. Install the test package while EFT is closed, then start with `Prism Exposure / Resolution percent = 100` and `Sharpen Filter / Enabled = true`.
+1. Install the test package while EFT is closed, then start with `1. Vanilla Optimizations / Prism Auto Exposure Resolution (%) = 100` and `1. Vanilla Optimizations / Sharpen Filter = true`.
 2. Capture the same fixed scene at exposure 100%, 50%, and optionally 25%. Keep all other rendering settings/camera/weather fixed. Compare Prism timings; do not interpret its whole 0.315 ms as exposure-only cost.
 3. At each setting, test dark-to-bright and bright-to-dark transitions, small bright objects, ADS/optics, night vision, menus/hideout and scene changes. Check exposure stability, clipping and recovery when returning to 100%.
 4. Toggle sharpen off/on live, compare its interval and appearance, and check health/weather desaturation. Repeat after scene changes and with optics.
-5. Compare `Inactive Effects / Skip neutral passes` off/on in the same fixed scene. Check the five status intervals individually and DoF separately. Record actual DoF aperture/blur settings before interpreting a remaining interval; the old benchmark does not contain those values. Expected eligible neutral status draws disappear; eligible zero-aperture DoF retains one CoC draw.
+5. Compare `1. Vanilla Optimizations / Skip Neutral Effects Passes` off/on in the same fixed scene. Check the five status intervals individually and DoF separately. Record actual DoF aperture/blur settings before interpreting a remaining interval; the old benchmark does not contain those values. Expected eligible neutral status draws disappear; eligible zero-aperture DoF retains one CoC draw.
 6. Exercise injury/bleeding, grayscale, infection, distortion, death/eye closing and recovery while toggling the optimization. Check rapid activation and combinations, ADS/optics, inventory focus, night/thermal vision, scene changes, and DLSS/FSR/SSAA off. Active effects must remain responsive and the screen must not freeze, flash stale content, or lose colour/alpha continuity.
 
 XeGTAO, BloomAndFlares and DLSS internals remain unchanged. DoF and the five status shaders remain native; only their eligible inactive image paths are shortened.

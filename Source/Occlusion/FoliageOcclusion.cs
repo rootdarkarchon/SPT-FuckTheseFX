@@ -23,8 +23,8 @@ namespace FuckTheseFX.Source.Occlusion
             material.SetTexture("_PrimaryAO",ao);
             material.SetTexture("_LiveAlpha",alpha);
             material.SetTexture("_ActorMask",actors);
-            material.SetVector("_LiveSettings",new Vector4(settings.FoliageExtraAO.Value,
-                settings.FoliageLive && settings.FoliageSplit.Value ? settings.FoliageSplitPosition.Value : -1,camera.farClipPlane,0));
+            material.SetVector("_LiveSettings",new Vector4(settings.FoliageExtraAOFraction,
+                settings.FoliageLive && settings.FoliageSplit.Value ? settings.FoliageSplitPositionFraction : -1,camera.farClipPlane,0));
         }
         internal void Record(OcclusionSettings settings, RenderTexture ao, RenderTexture alpha, RenderTexture actors)
         {

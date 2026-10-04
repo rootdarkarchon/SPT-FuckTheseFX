@@ -1,6 +1,31 @@
-param([string]$SptInstallPath = 'D:\Tarkov-SPT-4.1', [ValidatePattern('^[A-Za-z0-9-]*$')][string]$PackageSuffix = '')
+[CmdletBinding()]
+param([string]$SptInstallPath = 'D:\Tarkov-SPT-4.1')
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
+function Get-WorkingTreeHash([string]$RepositoryRoot) {
+    # Include actual tracked/untracked contents, excluding ignored build outputs.
+    $fileList = (& git -C $RepositoryRoot ls-files -z --cached --others --exclude-standard) -join "`n"
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot enumerate repository working tree for package naming' }
+    $paths = [Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($path in $fileList.Split([char]0)) {
+        if ($path.Length -gt 0) { [void]$paths.Add($path) }
+    }
+    $manifest = [Text.StringBuilder]::new()
+    foreach ($path in $paths) {
+        $fullPath = Join-Path $RepositoryRoot $path
+        # Deleted tracked files are absent from the working tree.
+        if (-not (Test-Path -LiteralPath $fullPath)) { continue }
+        if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { throw "Cannot hash working-tree entry: $path" }
+        $fileHash = (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash
+        [void]$manifest.Append($path).Append([char]0).Append($fileHash).Append([char]0)
+    }
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($manifest.ToString()))
+        return ([BitConverter]::ToString($digest)).Replace('-', '').ToLowerInvariant().Substring(0, 12)
+    } finally { $sha256.Dispose() }
+}
+$workingTreeHash = Get-WorkingTreeHash $repo
 $assets = @('distantshadows','occlusion','stochasticssr','water')
 & dotnet build (Join-Path $repo 'FuckTheseFX.csproj') -c Release "-p:SptInstallPath=$SptInstallPath" --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
@@ -67,7 +92,8 @@ $allowedEntries += @('FTFXNrd.dll','Assets/nrdssr','Licenses/NRD.txt','Licenses/
 foreach ($entry in $expected.Keys) {
     if ($entry -notin $allowedEntries) { throw "Non-runtime file prohibited in FTFX package: $entry" }
 }
-$zip = Join-Path $repo "bin\Release\FuckTheseFX-$version-SPT4.1$PackageSuffix.zip"
+if ((Get-WorkingTreeHash $repo) -ne $workingTreeHash) { throw 'Working tree changed during build; rebuild before packaging' }
+$zip = Join-Path $repo "bin\Release\FuckTheseFX-$version-SPT4.1-$workingTreeHash.zip"
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 # FileMode.Create replaces this exact generated artifact without touching other files.
 $file = [IO.File]::Open($zip, [IO.FileMode]::Create)

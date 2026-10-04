@@ -1,8 +1,8 @@
 # Distant shadows
 
-In **F12 > Fuck These FX > Distant Shadows**, **Enabled** defaults to true and **Resolution** defaults to **Half**. Select Quarter, Half or Full; higher resolutions sharpen shadow edges. Disable to restore the game or Shadow Flicker Fix resolution and native filtering. Changes apply without reloading the map.
+In **F12 > Fuck These FX > 1. Vanilla Optimizations**, **Distant Shadows Resolution Fix** defaults to true and **Distant Shadows Resolution** defaults to **Half**. Select Quarter, Half or Full; higher resolutions sharpen shadow edges. Disable to restore the game or Shadow Flicker Fix resolution and native filtering. Changes apply without reloading the map.
 
-Advanced **Adjust filter samples** enables the per-resolution filter controls while distant-shadow adjustments are enabled. Turn on **Advanced settings** to set the sample count for each mask resolution:
+Advanced **Distant Shadows Adjust Filter Samples** enables the per-resolution filter controls while distant-shadow adjustments are enabled. Turn on **Advanced settings** to set the sample count for each mask resolution:
 
 | EFT mask resolution | Default filter samples per shadow map |
 |---|---:|

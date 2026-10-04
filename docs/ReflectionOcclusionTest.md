@@ -1,6 +1,6 @@
 # Reflection occlusion test
 
-Install 1.6.5 with its matching assets and restart once. Enable Advanced settings, then use **XeGTAO / Reflection occlusion fix** to compare on/off live in the same scene. It defaults on and requires Custom Ambient Fix enabled with strength above zero. Keep AO radius, ambient strength, foliage extra AO and SSR settings unchanged for this comparison. No capture is required.
+Install 1.6.5 with its matching assets and restart once. Enable Advanced settings, then use **2. XeGTAO / Reflection occlusion fix** to compare on/off live in the same scene. It defaults on and requires Custom Ambient Fix enabled with strength above zero. Keep AO radius, ambient strength, foliage extra AO and SSR settings unchanged for this comparison. No capture is required.
 
 First check the wall behind the barrels: diffuse contact AO should now remain with the reflection fix both off and on. Version 1.6.5 protects CustomAmbient's diffuse AO from later decal alpha writes in both states. The toggle can still change reflected light, so total scene colour need not be identical. Then check the wet ground and foreground grass as below.
 

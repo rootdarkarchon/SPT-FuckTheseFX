@@ -1,12 +1,12 @@
 # Customs water surface
 
-Water Surface / Mode defaults to Native. FTFX replaces the Customs v3 water material for main and optic cameras, preserving native geometry, draw order and property blocks. Other maps, water families and unsupported ABI/rendering paths retain native water. The replacement requires the pinned EFT 40743 D3D11/Gamma path.
+5. Custom Water / Mode defaults to Native. FTFX replaces the Customs v3 water material for main and optic cameras, preserving native geometry, draw order and property blocks. Other maps, water families and unsupported ABI/rendering paths retain native water. The replacement requires the pinned EFT 40743 D3D11/Gamma path.
 
 The replacement changes only the initial normal block in the native shader arithmetic. Depth, absorption, Fresnel, roughness, foam, weather, thermal, reflection and G-buffer operations remain shared. It adds no passes, render targets, scene copies or geometry. The generated `WaterParity.cginc` and its extraction/generation scripts are required maintenance sources; extracted native assets stay under ignored `obj/` and are never packaged.
 
 ## Controls and live testing
 
-Select F12 > Fuck These FX > Water Surface, then compare Native and FTFX from the same Customs viewpoint. Show replacement tint turns FTFX water magenta to confirm routing; keep it off for appearance comparisons.
+Select F12 > Fuck These FX > Advanced > 5. Custom Water, then compare Native and FTFX from the same Customs viewpoint. Show replacement tint turns FTFX water magenta to confirm routing; keep it off for appearance comparisons.
 
 | Control | Effect | Default | Range |
 |---|---|---:|---:|

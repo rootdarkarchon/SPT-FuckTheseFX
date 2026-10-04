@@ -4,6 +4,7 @@ $repo=Split-Path $PSScriptRoot -Parent
 $project=Join-Path $repo 'obj/NrdStandardValidation'
 foreach($folder in @('Assets/Editor','Assets/Plugins','Assets/BeforeNrdStandard','Assets/AMD','Packages','ProjectSettings','Output','Native','Replay')) {New-Item -ItemType Directory -Force (Join-Path $project $folder)|Out-Null}
 Copy-Item (Join-Path $repo 'Source/StochasticSSR/*.cs') (Join-Path $project 'Assets/Editor') -Force
+Copy-Item (Join-Path $repo 'SettingsCatalog.cs') (Join-Path $project 'Assets/Editor') -Force
 Copy-Item (Join-Path $repo 'ConfigurationManagerAttributes.cs') (Join-Path $project 'Assets/Editor') -Force
 Copy-Item (Join-Path $repo 'unity/StochasticSsrValidation/NrdStandardValidation.cs') (Join-Path $project 'Assets/Editor') -Force
 foreach($source in Get-ChildItem (Join-Path $repo 'unity/StochasticSsrValidation/Baseline/BeforeNrdStandard/Source') -Filter '*.cs') {

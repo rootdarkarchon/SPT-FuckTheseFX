@@ -12,7 +12,7 @@ public static partial class OcclusionValidation
  {
   var camera=Scene(64,64,out var target,out var geometry);
   var settings=new OcclusionSettings(new ConfigFile(Path.GetFullPath("foliage-capture.cfg"),false){SaveOnConfigSet=false});
-  settings.View.Value=OcclusionView.FoliageLightingCapture;settings.AmbientStrength.Value=1;settings.Foliage.Value=1;settings.Actors.Value=false;
+  settings.View.Value=OcclusionView.FoliageLightingCapture;settings.AmbientStrength.Value=100;settings.Foliage.Value=100;settings.Actors.Value=false;
   var mat=new Material(assets.Ambient);mat.EnableKeyword("UNITY_HDR_ON");
   mat.SetFloat("_FTFX_CAAmount",1);mat.SetFloat("_FTFX_CA_FoliageStrength",1);
   foreach(var name in new[]{"_SHAr","_SHAg","_SHAb"})mat.SetVector(name,new Vector4(0,0,0,.2f));

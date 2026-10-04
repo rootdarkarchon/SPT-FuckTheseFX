@@ -45,12 +45,12 @@ namespace FuckTheseFX.Source.Occlusion
             b.AppendLine("HDR="+camera.allowHDR+" colorSpace="+QualitySettings.activeColorSpace+" path="+camera.actualRenderingPath+" API="+SystemInfo.graphicsDeviceType);
             b.AppendLine("Position="+camera.transform.position.ToString("F6")+" rotation="+camera.transform.rotation.ToString("F6")+" FOV="+camera.fieldOfView.ToString(CultureInfo.InvariantCulture));
             b.AppendLine("near="+camera.nearClipPlane+" far="+camera.farClipPlane+" target="+(camera.targetTexture != null ? camera.targetTexture.name : "backbuffer"));
-            b.AppendLine("AmbientEnabled="+settings.Ambient.Value+" strength="+settings.AmbientStrength.Value+" foliage="+settings.Foliage.Value+" bent="+settings.BentNormals.Value);
+            b.AppendLine("AmbientEnabled="+settings.Ambient.Value+" strength="+settings.AmbientStrengthFraction+" foliage="+settings.FoliageFraction+" bent="+settings.BentNormals.Value);
             b.AppendLine("ReflectionOcclusionFix="+settings.ReflectionOcclusion.Value);
             b.AppendLine("Fade="+settings.FadeStart.Value+".."+settings.FadeEnd.Value+" resolved="+settings.DistanceFade+" quality="+settings.Quality.Value);
             b.AppendLine("Radius="+settings.Radius.Value+" multiplier="+settings.RadiusMultiplier.Value+" power="+settings.Power.Value+" denoise="+settings.Denoise.Value+" normals="+settings.Normals.Value);
             b.AppendLine("ActorPass="+settings.Actors.Value+" contactGI="+settings.Bleed.Enabled.Value+" contactGIStrength="+settings.Bleed.Strength.Value);
-            b.AppendLine("FoliageExtraAO="+settings.FoliageExtraAO.Value+" (before native opaque post-processing and fog, main-camera HDR only)");
+            b.AppendLine("FoliageExtraAO="+settings.FoliageExtraAOFraction+" (before native opaque post-processing and fog, main-camera HDR only)");
             metadata = b.ToString();
         }
         private static void Copy(CommandBuffer cb, RenderTexture destination)

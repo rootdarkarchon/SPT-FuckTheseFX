@@ -2,13 +2,13 @@
 
 For live foliage comparisons, temporary lighting bypasses and the optional single-frame capture, see [Foliage lighting tests](FoliageLightingTest.md).
 
-**XeGTAO / Reflection occlusion fix** (Advanced, default on) reduces screen-space reflection occlusion by up to 50% on smooth surfaces, tapering with smoothness squared to no reduction on fully rough surfaces. It works at every viewing angle, preserves diffuse AO and excludes the native motion-depth vegetation path. Requires the Custom Ambient Fix. See [reflection occlusion testing](ReflectionOcclusionTest.md) for live comparison and integration details.
+**2. XeGTAO / Reflection occlusion fix** (Advanced, default on) reduces screen-space reflection occlusion by up to 50% on smooth surfaces, tapering with smoothness squared to no reduction on fully rough surfaces. It works at every viewing angle, preserves diffuse AO and excludes the native motion-depth vegetation path. Requires the Custom Ambient Fix. See [reflection occlusion testing](ReflectionOcclusionTest.md) for live comparison and integration details.
 
 FuckTheseFX owns XeGTAO without an AOReplacer assembly, Amplify class, shader or render target. The Intel estimator and reviewed EFT 40743 CustomAmbient shader retain their provenance. Camera routing, allocation, deferred composition, fallback and configuration are implemented independently here.
 
-The normal AO controls are **XeGTAO / Enabled**, **XeGTAO / Quality** (0-3, default 3), and **XeGTAO / Second Pass Enabled**. XeGTAO tuning, CustomAmbient, actor tuning and debug settings remain available under Advanced. Values come from FuckTheseFX's configuration and defaults; no AOReplacer config is read. The FTFX Quality slider (0-3, default 3) selects the 1/2/3/9-slice presets for both AO passes unless primary sampling counts are overridden.
+The normal AO controls are **2. XeGTAO / Enabled**, **2. XeGTAO / Quality** (0-3, default 3), and **2. XeGTAO / Second Pass Enabled**. XeGTAO tuning, CustomAmbient, actor tuning and debug settings remain available under Advanced. Values come from FuckTheseFX's configuration and defaults; no AOReplacer config is read. The FTFX Quality slider (0-3, default 3) selects the 1/2/3/9-slice presets for both AO passes unless primary sampling counts are overridden.
 
-AOReplacer is a soft dependency for load ordering only. When its plugin ID is present, no FuckTheseFX occlusion integration, shader bundle, camera hook, CustomAmbient patch or diagnostic overlay is initialized. Bloom, distant shadows and ambient highlight continue independently. The saved occlusion preferences remain available for a later launch without AOReplacer.
+The occlusion integration initializes independently of other rendering plugins. FTFX settings and the native camera/rendering requirements determine when its effects run.
 
 ## Rendering
 
@@ -28,15 +28,15 @@ The actor composite reads filtered integer AO and linear depth directly. It pres
 
 - `scripts/Test-Occlusion.ps1`: D3D11 bundle compilation, real Harmony routing against an API fixture, native fallback, HDR/LDR composition, full-frame versus tiled actor equivalence, old versus fused actor composite, stencil classes, original-alpha capture, camera resets/resizing, all nine debug views and disposal.
 - `scripts/Test-CustomAmbient.ps1`: native-parity and bent-normal shader checks against the installed native ambient shader, including diffuse/fill, reflections, fog/night vision, authored zero-alpha foliage and both HDR encodings.
-- `scripts/Build-Package.ps1`: Release compilation, configuration entries, unchanged other-FX contracts, installed EFT AO/ambient/stencil ABI, compiled AOReplacer bypass, no Amplify dependency, exact ZIP allowlist and entry hashes.
+- `scripts/Build-Package.ps1`: Release compilation, configuration entries, unchanged other-FX contracts, installed EFT AO/ambient/stencil ABI, AO initialization without installed-plugin bypasses, no Amplify dependency, exact ZIP allowlist and entry hashes.
 
 The actor GPU fixtures compare more than 83,000 actor pixels at 256Ãƒâ€”144 and 259Ãƒâ€”147, including sparse, full, edge, moving, empty and distance-rejected masks. Sampled actor output is bit-identical to the full-frame estimator; the fused composite matches the former resolve/composite within 0.000001. These tests establish the tested shader contracts, not live EFT visual or FPS acceptance.
 
-Bent normals are optional (Advanced: XeGTAO / Custom Ambient Fix Bent normals, off by default).
+Bent normals are optional (Advanced: 2. XeGTAO / Custom Ambient Fix Bent normals, off by default).
 They steer only directional SH diffuse ambient; native upward blending, reflection, fill,
 scalar AO and the actor estimator keep their existing roles. Strength, foliage strength
 and the shared configurable AO distance fade also scale this directional correction. Requires the CustomAmbient
-fix and XeGTAO; AOReplacer presence bypasses this feature with the rest of FTFX AO.
+fix and XeGTAO.
 The BentNormals debug view displays world-space RGB directions, or gray when inactive.
 The primary estimator and denoiser use Intel's packed direction/visibility variant in
 the existing R32 textures. No extra full-screen target or resolve is added. The actor

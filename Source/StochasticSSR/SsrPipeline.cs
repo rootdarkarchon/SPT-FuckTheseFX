@@ -13,8 +13,8 @@ namespace FuckTheseFX.Source.StochasticSSR
     {
         internal SsrMode Mode;
         internal int Steps,HistoryFrames,ContinuationSamples;
-        internal float Distance,Thickness,Smoothness,EdgePixels,FallbackStrength,SurfaceColourInfluence,ContinuationPixels,ContinuationDepth,ThicknessConfidenceFloor;
-        internal bool Temporal,LimitNativeRange,Freeze,BypassHitNormal,CaptureContinuation,CaptureTraversal,GlobalContinuedSky;
+        internal float Thickness,Smoothness,EdgePixels,FallbackStrength,SurfaceColourInfluence,ContinuationPixels,ContinuationDepth,ThicknessConfidenceFloor;
+        internal bool Temporal,Freeze,CaptureContinuation,CaptureTraversal;
         internal ReflectionResolution Resolution;
         internal ReflectionView View;
         internal ReflectionReconstruction Reconstruction;
@@ -31,8 +31,6 @@ namespace FuckTheseFX.Source.StochasticSSR
                 SupportSmoothness=native;Smoothness=Mathf.Clamp01(ReceiverCutoff.Value);
             }
         }
-        // LimitNativeRange retains its field name for configuration/capture
-        // compatibility; it now gates camera-to-receiver eligibility only.
         // Resolution denotes the square trace extent.
         internal Vector2Int TraceDimensions()
         {
@@ -125,24 +123,19 @@ namespace FuckTheseFX.Source.StochasticSSR
                 compute.DisableKeyword("FTFX_TRACE_DIAGNOSTICS");
                 if(!preserveDiagnostics){Drop(ref Sample);Drop(ref DepthHit);}
             }
-            // Specialize the existing bypass so view-matrix rows do not stay
-            // live for source-normal validation that cannot run in this mode.
-            if(o.BypassHitNormal)compute.EnableKeyword("FTFX_BYPASS_HIT_NORMAL");else compute.DisableKeyword("FTFX_BYPASS_HIT_NORMAL");
             int w=CameraWidth,h=CameraHeight;var projection=GL.GetGPUProjectionMatrix(camera.projectionMatrix,false);
             if(Raster.Enabled)compute.EnableKeyword("FTFX_LATE_RASTER");else compute.DisableKeyword("FTFX_LATE_RASTER");
             cb.SetComputeFloatParam(compute,"_SsrLateRaster",Raster.Enabled?1:0);
             cb.SetComputeBufferParam(compute,traceKernel,"_SsrRasterState",Raster.Buffer);
             cb.SetComputeMatrixParam(compute,"_Projection",projection);cb.SetComputeMatrixParam(compute,"_InverseProjection",projection.inverse);cb.SetComputeMatrixParam(compute,"_WorldToView",camera.worldToCameraMatrix);
             cb.SetComputeVectorParam(compute,"_Size",new Vector4(w,h,Radiance.width,Radiance.height));
-            cb.SetComputeVectorParam(compute,"_Trace",new Vector4(o.Distance,o.Thickness,o.Smoothness,o.Steps));
-            cb.SetComputeVectorParam(compute,"_Clip",new Vector4(camera.nearClipPlane,camera.farClipPlane,Depth.Count-1,o.LimitNativeRange?1:0));
+            cb.SetComputeVectorParam(compute,"_Trace",new Vector4(0,o.Thickness,o.Smoothness,o.Steps));
+            cb.SetComputeVectorParam(compute,"_Clip",new Vector4(camera.nearClipPlane,camera.farClipPlane,Depth.Count-1,0));
             LastSamplePhase=o.Freeze?0:sampleIndex++;
             cb.SetComputeIntParam(compute,"_Frame",LastSamplePhase);
             cb.SetComputeFloatParam(compute,"_EdgePixels",o.EdgePixels);
-            cb.SetComputeIntParam(compute,"_BypassHitNormal",o.BypassHitNormal?1:0);
             cb.SetComputeFloatParam(compute,"_ThicknessConfidenceFloor",o.ThicknessConfidenceFloor);
             cb.SetComputeVectorParam(compute,"_Continuation",new Vector4(o.ContinuationSamples,o.ContinuationPixels,o.ContinuationDepth,0));
-            cb.SetComputeIntParam(compute,"_GlobalContinuedSky",o.GlobalContinuedSky?1:0);
             cb.SetComputeIntParam(compute,"_ZeroSmoothnessProbe",o.ZeroSmoothnessProbe?1:0);
             using(SsrGpuSample.Measure(cb,camera,"HiZ build")) {
                 properties.Clear();properties.SetBuffer("_SsrRasterState",Raster.Buffer);properties.SetFloat("_SsrLateRaster",Raster.Enabled?1:0);properties.SetMatrix("_InverseProjection",projection.inverse);properties.SetVector("_Size",new Vector4(w,h,0,0));
@@ -167,7 +160,7 @@ namespace FuckTheseFX.Source.StochasticSSR
                 if(diagnostics)cb.SetComputeTextureParam(compute,traceKernel,"_SampleOutput",Sample);
                 cb.DispatchCompute(compute,traceKernel,(Radiance.width+traceGroupWidth-1)/traceGroupWidth,(Radiance.height+traceGroupHeight-1)/traceGroupHeight,1);
             }
-            if((water!=null || o.GlobalContinuedSky) && continuedSkyKernel>=0) {
+            if(continuedSkyKernel>=0) {
                 using(SsrGpuSample.Measure(cb,camera,"Completed continuation sky")) {
                     cb.SetComputeBufferParam(compute,continuedSkyKernel,"_SsrRasterState",Raster.Buffer);
                     cb.SetComputeTextureParam(compute,continuedSkyKernel,"_WaterSurface",(Texture)water??Texture2D.blackTexture);

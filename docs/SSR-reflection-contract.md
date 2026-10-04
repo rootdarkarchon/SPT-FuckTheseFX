@@ -4,7 +4,7 @@ The current controls and defaults are in [Stochastic SSR](StochasticSSR.md). Thi
 
 ## Ownership and signal
 
-FTFX replaces the main deferred camera's SSR renderer as a unit. Native SSR remains responsible for optics, disabled/unsupported cameras and failure fallback; SSRSix bypasses FTFX before asset loading or patching. The replacement uses camera-sized depth and a square trace grid, with full-density GGX launches from original receiver normals.
+FTFX replaces the main deferred camera's SSR renderer as a unit. Native SSR remains responsible for optics, disabled/unsupported cameras and failure fallback. The replacement uses camera-sized depth and a square trace grid, with full-density GGX launches from original receiver normals.
 
 Trace records distinguish measured geometry, confirmed sky and unresolved/protected misses. Smith visibility is estimator amplitude, separate from hit confidence. Resolve stores RGB radiance premultiplied by coverage and alpha coverage. Neither filtered coverage nor NRD hit-distance estimates establish new geometry or sky. Offscreen, self-hit and budget failures cannot become sky. Completed continuation requires bounded allowances and a clear in-screen far-plane endpoint.
 

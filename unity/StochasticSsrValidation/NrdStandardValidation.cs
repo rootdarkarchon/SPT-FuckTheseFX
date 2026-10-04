@@ -26,7 +26,7 @@ public static class NrdStandardValidation {
     private static int width=192,height=128;
     [System.Runtime.InteropServices.DllImport("FTFXNrd",CallingConvention=System.Runtime.InteropServices.CallingConvention.Cdecl)]
     private static extern IntPtr FTFX_NrdQueue(IntPtr id,IntPtr signal,IntPtr normal,IntPtr receiver,IntPtr motion,IntPtr output,ref NrdSpecularBackend.Frame frame);
-    private static Options Options()=>new Options {Mode=SsrMode.Stochastic,Steps=350,Distance=250,Thickness=1,Smoothness=.4f,HistoryFrames=16,EdgePixels=0,FallbackStrength=.65f,Temporal=true,ContinuationSamples=350,ContinuationPixels=500,ContinuationDepth=200,GlobalContinuedSky=true,BypassHitNormal=true,ThicknessConfidenceFloor=1,ZeroSmoothnessProbe=true,ZeroSmoothnessProbeStrength=.3f,ZeroSmoothnessProbeClose=.1f,ZeroSmoothnessProbeFadeStart=5,ZeroSmoothnessProbeFadeEnd=15};
+    private static Options Options()=>new Options {Mode=SsrMode.Stochastic,Steps=350,Thickness=1,Smoothness=.4f,HistoryFrames=16,EdgePixels=0,FallbackStrength=.65f,Temporal=true,ContinuationSamples=350,ContinuationPixels=500,ContinuationDepth=200,ThicknessConfidenceFloor=1,ZeroSmoothnessProbe=true,ZeroSmoothnessProbeStrength=.3f,ZeroSmoothnessProbeClose=.1f,ZeroSmoothnessProbeFadeStart=5,ZeroSmoothnessProbeFadeEnd=15};
     private static Before.Options Baseline(Options o) {
         object b=new Before.Options();
         foreach(var f in typeof(Options).GetFields(BindingFlags.Instance|BindingFlags.NonPublic)) {
@@ -35,7 +35,7 @@ public static class NrdStandardValidation {
             if(f.FieldType.IsEnum)value=Enum.ToObject(target.FieldType,(int)value);
             target.SetValue(b,value);
         }
-        var result=(Before.Options)b;result.NrdSpecular=true;result.WaterNormals=false;result.UseCapturedContribution=false;return result;
+        var result=(Before.Options)b;result.NrdSpecular=true;result.BypassHitNormal=true;result.GlobalContinuedSky=true;result.LimitNativeRange=false;result.WaterNormals=false;result.UseCapturedContribution=false;return result;
     }
     private static void Finite(Color[] pixels,string name) { Check(pixels.All(v=>!float.IsNaN(v.r+v.g+v.b+v.a) && !float.IsInfinity(v.r+v.g+v.b+v.a)),name+" finite"); }
     public static void Run() {
@@ -139,15 +139,12 @@ public static class NrdStandardValidation {
 
 
     private static void ConfigContracts() {
-        var retired=new[]{"Use captured CustomAmbient subtraction","Normal stabilization","Trace normal strength","Normal stabilization start distance","Normal stabilization end distance","Normal filter radius","Experimental NRD REBLUR specular","Rough reflection coverage accumulation","Rough coverage full-strength smoothness","Rough coverage fade-out smoothness","Coverage reconstruction filter","Coverage filter strength","Coverage filter full-strength smoothness","Coverage filter fade-end smoothness","Coverage filter smooth-surface strength"};
-        File.WriteAllText("defaults.cfg", "");var c=new ConfigFile("defaults.cfg",false);var settings=new SsrSettings(c);
-        Check(c.Count==29 && !settings.Enabled.Value && settings.Steps.Value==350 && settings.ContinuationSamples.Value==350 && settings.HistoryFrames.Value==16 && settings.ReceiverCutoff.Value==.4f && settings.FallbackStrength.Value==.65f && settings.CutoffEnvironmentBlend.Value==.25f,"NRD-only fresh defaults and 29 SSR settings");
-        foreach(string debug in new[]{"NormalStability","WaterNormalStability","40","ExactRoundTrip","23","18","EnvironmentFallback","17"}) {
-            File.WriteAllText("retired.cfg","[Stochastic SSR]\n"+string.Join("\n",retired.Select(k=>k+" = false"))+"\nDebug view = "+debug+"\nFallback strength = 0.6525822\nHistory frames = 12\n[Unrelated]\nPreference = untouched\n");
-            var saved=new ConfigFile("retired.cfg",false);var state=new SsrSettings(saved);new SsrSettings(saved);saved.Save();
-            Check(saved.Count==29 && state.View.Value==ReflectionView.Normal && state.FallbackStrength.Value==.6525822f && state.HistoryFrames.Value==12,"retired debug/controls preserve saved values: "+debug);
-            var lines=File.ReadAllText("retired.cfg").Split('\n');Check(retired.All(k=>!lines.Any(l=>l.StartsWith(k+" ="))) && lines.Any(l=>l.Contains("Preference = untouched")),"retired controls removed without unrelated loss: "+debug);
-        }
+        File.WriteAllText("defaults.cfg", "");var c=new ConfigFile("defaults.cfg",false);c.SaveOnConfigSet=false;var settings=new SsrSettings(c);
+        Check(c.Count==25 && !settings.Enabled.Value && settings.Steps.Value==350 && settings.ContinuationSamples.Value==350 && settings.HistoryFrames.Value==8 && settings.Read().HistoryFrames==8 && settings.ReceiverCutoff.Value==40 && settings.FallbackStrength.Value==65 && settings.CutoffEnvironmentBlend.Value==25,"fresh integer defaults, eight-frame runtime history and 25 SSR settings");
+        Check(settings.Read().ReceiverCutoff==.4f && settings.Read().FallbackStrength==.65f && settings.Read().CutoffEnvironmentBlend==.25f,"SSR percentages resolve once");
+        settings.HistoryFrames.Value=32;Check(settings.Read().HistoryFrames==32,"32-frame history setting");
+        settings.FallbackStrength.Value=37;c.Save();
+        var saved=new SsrSettings(new ConfigFile("defaults.cfg",false));Check(saved.FallbackStrength.Value==37,"new SSR percentage persists");
         Check(!typeof(SsrReflectionPipeline).GetFields(BindingFlags.Instance|BindingFlags.NonPublic).Any(f=>f.Name.StartsWith("History")||f.Name.Contains("Anchor")||f.Name=="DepthGapFilled"||f.Name=="exactResidual"),"no custom GGX histories, display attachment or exact residual remain");
     }
     private static void RejectionDiagnosticsLifecycle() {
@@ -211,7 +208,7 @@ public static class NrdStandardValidation {
         using(var cb=new CommandBuffer())using(var p=new SsrReflectionPipeline(compute,blend,reflection,noise,native,gaussian)) {
             var o=Options();p.Ensure(width,height,128,RenderTextureFormat.ARGBHalf);
             void Render(){Globals(cb);TodGlobals(cb,.2f);p.Render(cb,camera,scene,camera.targetTexture,o,depths,normals,specular);Execute(cb);Check(p.Nrd.Stats.Status==1,"lifecycle NRD success");}
-            Render();o.Temporal=false;Render();o.Temporal=true;o.HistoryFrames=4;Render();o.NrdAntiFirefly=true;Render();o.NrdAntiFirefly=false;Render();
+            Render();o.Temporal=false;Render();o.Temporal=true;foreach(int frames in new[]{1,16,32}){o.HistoryFrames=frames;Render();}o.NrdAntiFirefly=true;Render();o.NrdAntiFirefly=false;Render();
             var snapshot=Read(camera.targetTexture);Globals(cb);TodGlobals(cb,.2f);cb.Blit(scene,camera.targetTexture);p.ResetHistory();p.Render(cb,camera,camera.targetTexture,camera.targetTexture,o,depths,normals,specular);Execute(cb);Finite(Read(camera.targetTexture),"alias result");
             o.CaptureContinuation=true;Globals(cb);TodGlobals(cb,.2f);p.Render(cb,camera,scene,camera.targetTexture,o,depths,normals,specular);
             var capture=(ContinuationCapture)AccessTools.Field(typeof(SsrReflectionPipeline),"continuationCapture").GetValue(p);var detached=p.Resolved;var detachedRejection=p.TracePipeline.TraceStop;p.Ensure(width,height,96,RenderTextureFormat.ARGBHalf);

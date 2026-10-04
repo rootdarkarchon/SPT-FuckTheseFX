@@ -3,7 +3,7 @@
 Opt-in short-range diffuse color transfer, separate from existing AO tuning. Requires
 FTFX XeGTAO, D3D11, HDR deferred rendering and CameraManager.Instance.Camera.
 Both Gamma (used by the installed EFT PlayerSettings) and Linear color space are supported.
-AOReplacer presence and game AO Off bypass it with the FTFX occlusion stack.
+Game AO Off bypasses it with the FTFX occlusion stack.
 CustomAmbient's fix and bent normals are not required. Existing ambient is sampled
 as rendered; its lighting and AO behavior are not changed.
 

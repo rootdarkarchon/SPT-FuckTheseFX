@@ -53,7 +53,7 @@ namespace FuckTheseFX.Source.Prism
 
         internal static RenderTexture GetExposureInput(int width, int height, int depth, RenderTextureFormat format)
         {
-            float percent = Plugin.PrismExposurePercent.Value;
+            int percent = Plugin.PrismExposurePercent.Value;
             return RenderTexture.GetTemporary(ExposureResolutionPolicy.Scale(width, percent),
                 ExposureResolutionPolicy.Scale(height, percent), depth, format);
         }

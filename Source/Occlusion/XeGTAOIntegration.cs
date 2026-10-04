@@ -139,7 +139,7 @@ namespace FuckTheseFX.Source.Occlusion
                 foreach(var binding in bindings.Values) { binding.Restore(); binding.Failed = false; }
                 ambient.Restore(); diagnostic = null;
             }
-            if(!settings.Ambient.Value || settings.AmbientStrength.Value <= 0) ambient.Restore();
+            if(!settings.Ambient.Value || settings.AmbientStrengthFraction <= 0) ambient.Restore();
             if(++cleanupFrames >= 300) { cleanupFrames = 0; ambient.Prune(); }
             dead.Clear();
             foreach(var pair in bindings) if(pair.Key == null || pair.Value.Camera == null) dead.Add(pair.Key);
@@ -222,11 +222,11 @@ namespace FuckTheseFX.Source.Occlusion
                 GUI.depth=1000; GUI.color=Color.white;
                 bool scene=settings.FoliagePreview.Value==FoliageLivePreview.Scene;
                 if(live != null && !scene) GUI.DrawTexture(new Rect(0,0,Screen.width,Screen.height),live.Display,ScaleMode.StretchToFill,false);
-                if(live != null && live.OpaqueFound && scene && settings.FoliageSplit.Value && settings.FoliageExtraAO.Value>0)
-                    GUI.DrawTexture(new Rect(Screen.width*settings.FoliageSplitPosition.Value,0,1,Screen.height),Texture2D.whiteTexture);
+                if(live != null && live.OpaqueFound && scene && settings.FoliageSplit.Value && settings.FoliageExtraAOFraction>0)
+                    GUI.DrawTexture(new Rect(Screen.width*settings.FoliageSplitPositionFraction,0,1,Screen.height),Texture2D.whiteTexture);
                 string status=live==null ? "Unavailable: requires active main-camera XeGTAO, game AO on, HDR and Custom Ambient Fix strength above zero." :
                     !live.OpaqueFound ? "Opaque buffer missing or ambiguous: opaque bypass and extra AO are inactive; opaque previews are invalid." :
-                    "GI bypass: "+settings.FoliageBypassGI.Value+" | Opaque colour bypass: "+settings.FoliageBypassOpaque.Value+" | Extra AO: "+settings.FoliageExtraAO.Value.ToString("P0")+
+                    "GI bypass: "+settings.FoliageBypassGI.Value+" | Opaque colour bypass: "+settings.FoliageBypassOpaque.Value+" | Extra AO: "+settings.FoliageExtraAOFraction.ToString("P0")+
                     (settings.FoliageSplit.Value ? " (left original / right extra AO)" : " (whole scene)");
                 GUI.Box(new Rect(15,15,1120,100),"Foliage live | "+settings.FoliagePreview.Value+" | Extra AO: Advanced / XeGTAO. Previews: Advanced / Debug. Normal exits and resets bypasses.\n"+status+
                     "\nStage previews are raw buffers; differences show absolute RGB change, not lost AO. BeforeOpaque includes extra AO; AfterOpaque is before bypass.\nNo dumps or restart needed. Main camera only. Temporary bypasses affect both sides; zero-alpha mask may include non-foliage.");

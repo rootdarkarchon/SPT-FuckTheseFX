@@ -117,7 +117,7 @@ public static partial class OcclusionValidation
     settings.ReflectionOcclusion.Value=true;settings.Ambient.Value=false;first.Record(settings,2,true,true);
     Require(field.GetValue(first)==null,"disabled ambient allowed inconsistent reflection/diffuse data");settings.Ambient.Value=true;
     settings.AmbientStrength.Value=0;first.Record(settings,2,true,true);
-    Require(field.GetValue(first)==null,"zero ambient strength retained protected diffuse AO");settings.AmbientStrength.Value=.6f;
+    Require(field.GetValue(first)==null,"zero ambient strength retained protected diffuse AO");settings.AmbientStrength.Value=60;
     first.Record(settings,2,false,true);Require(field.GetValue(first)==null,"unavailable ambient allowed reflection fix");
     second.Record(settings,2,true,false);optic.Render();Require(((RenderTexture)field.GetValue(second)).width==48,"optic correction did not use its own dimensions");
    }

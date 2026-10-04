@@ -84,7 +84,7 @@ public static partial class OcclusionValidation
    settings.Bleed.Enabled.Value=false;
    camera.RemoveCommandBuffer(CameraEvent.BeforeImageEffectsOpaque,opaque);effect.Record(settings,2,true,true);
    Require(!effect.Live.OpaqueFound,"missing opaque buffer was accepted");
-   settings.FoliageExtraAO.Value=1;effect.Record(settings,2,true,true);
+   settings.FoliageExtraAO.Value=100;effect.Record(settings,2,true,true);
    Require(!HasFoliagePass(camera),"missing opaque contract did not fail closed");
    camera.AddCommandBuffer(CameraEvent.BeforeImageEffectsOpaque,opaque);
    effect.Record(settings,2,true,false);Require(effect.Live==null,"optic retained main-only live resources");
@@ -94,8 +94,8 @@ public static partial class OcclusionValidation
    Require(effect.Live==null,"normal mode retained live resources");
    Require(HasFoliagePass(camera),"normal mode lost persistent foliage AO");
    Require(camera.GetCommandBuffers(CameraEvent.AfterForwardAlpha).Length==0,"normal foliage AO retained diagnostic copies");
-   settings.FoliageExtraAO.Value=.2f;settings.ResetFoliageExperiment();
-   Require(settings.FoliageExtraAO.Value==.2f,"debug reset cleared persistent foliage strength");
+   settings.FoliageExtraAO.Value=20;settings.ResetFoliageExperiment();
+   Require(settings.FoliageExtraAO.Value==20,"debug reset cleared persistent foliage strength");
    settings.Ambient.Value=false;effect.Record(settings,2,true,true);camera.Render();
    Require(HasFoliagePass(camera),"foliage AO incorrectly depends on ambient fix");
    settings.FoliageExtraAO.Value=0;effect.Record(settings,2,true,true);
@@ -112,7 +112,7 @@ public static partial class OcclusionValidation
  {
   var camera=Scene(64,64,out var target,out var geometry);
   var settings=new OcclusionSettings(new ConfigFile(Path.GetFullPath("foliage-persistent.cfg"),false){SaveOnConfigSet=false});
-  Require(settings.FoliageExtraAO.Value==.2f && settings.FadeStart.Value==100 && settings.FadeEnd.Value==250,"new foliage defaults");
+  Require(settings.FoliageExtraAO.Value==20 && settings.FadeStart.Value==100 && settings.FadeEnd.Value==250,"new foliage defaults");
   var ao=GpuAssets.Target("persistent AO",64,64,GraphicsFormat.R32G32_SFloat);
   var alpha=GpuAssets.Target("persistent alpha",64,64,GraphicsFormat.R8_UNorm);
   var actor=GpuAssets.Target("persistent actor",64,64,GraphicsFormat.R8_UNorm);
@@ -131,7 +131,7 @@ public static partial class OcclusionValidation
    foreach(float strength in new[]{.2f,.6f})
    foreach(float transmission in new[]{1f,.25f,0f})
    {
-    settings.FoliageExtraAO.Value=strength;
+    settings.FoliageExtraAO.Value=Mathf.RoundToInt(strength*100);
     fog.SetVector("_Fog",new Vector4(.6f,.6f,.6f,1-transmission));
     Clear(ao,new Color(.8f,depth/(camera.farClipPlane/65504f),0,0));
     float fade=Mathf.Clamp01((depth-100)/150);

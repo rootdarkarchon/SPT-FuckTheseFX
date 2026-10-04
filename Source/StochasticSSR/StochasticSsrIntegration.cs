@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using System.Security.Cryptography;
-using BepInEx.Bootstrap;
 using EFT.CameraControl;
 using HarmonyLib;
 using UnityEngine;
@@ -12,7 +11,6 @@ namespace FuckTheseFX.Source.StochasticSSR
 {
     internal sealed class StochasticSsrIntegration : IDisposable
     {
-        internal const string SsrsixGuid="com.matsix.ssrsix";
         private readonly string path;
         private readonly SsrSettings settings;
         private AssetBundle bundle;
@@ -24,16 +22,8 @@ namespace FuckTheseFX.Source.StochasticSSR
         private int frames;
         internal StochasticSsrIntegration(string path, SsrSettings settings) { this.path=path;this.settings=settings; }
 
-        internal static bool HasConflict() => Chainloader.PluginInfos.ContainsKey(SsrsixGuid);
         internal void Initialize()
         {
-            // The soft dependency makes SSRSix's registration available before Awake.
-            // Do not load assets or patch SSR at all when another owner is installed.
-            if(HasConflict())
-            {
-                Plugin.MyLog.LogInfo("SSRSix is installed: FTFX Stochastic SSR is bypassed. Other FX remain active.");
-                return;
-            }
             try
             {
                 var renderer=AccessTools.TypeByName("UnityEngine.Rendering.PostProcessing.ScreenSpaceReflectionsRenderer") ?? throw new TypeLoadException("Native SSR renderer missing");
@@ -81,7 +71,6 @@ namespace FuckTheseFX.Source.StochasticSSR
         internal void Update()
         {
             if(hooks==null)return;
-            if(HasConflict()){Dispose();return;}
             AmbientSurfaceCapture.Prune();
             if(frames%300==0)waterCapture?.Prune();
             if(previousEnabled!=settings.Enabled.Value){hooks.Suspend();previousEnabled=settings.Enabled.Value;}

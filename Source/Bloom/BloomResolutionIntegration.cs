@@ -17,8 +17,6 @@ namespace FuckTheseFX.Source.Bloom
         [ThreadStatic] private static FrameState current;
         private Harmony harmony;
         private MethodInfo method;
-        private Type ssaaType;
-        private MethodInfo inputWidth, inputHeight;
         private bool warned;
 
         private sealed class FrameState
@@ -37,17 +35,6 @@ namespace FuckTheseFX.Source.Bloom
                 if (method == null || method.IsStatic || method.ReturnType != typeof(void) ||
                     !typeof(Component).IsAssignableFrom(type))
                     throw new MissingMethodException("UltimateBloom.OnRenderImageInternal");
-                if (Harmony.GetPatchInfo(method)?.Owners.Contains("com.matsix.sptaoreplacer.bloom-resolution") == true)
-                {
-                    Plugin.MyLog.LogWarning("Bloom adjustments skipped: an older AO Replacer still owns bloom. Install AO Replacer 1.3.4 or newer. Ambient Highlight and distant-shadow controls will still initialize.");
-                    return;
-                }
-                ssaaType = AccessTools.TypeByName("SSAA");
-                inputWidth = ssaaType == null ? null : AccessTools.Method(ssaaType, "GetInputWidth", Type.EmptyTypes);
-                inputHeight = ssaaType == null ? null : AccessTools.Method(ssaaType, "GetInputHeight", Type.EmptyTypes);
-                if (inputWidth == null || inputHeight == null || inputWidth.ReturnType != typeof(int) ||
-                    inputHeight.ReturnType != typeof(int) || !typeof(Behaviour).IsAssignableFrom(ssaaType))
-                    throw new MissingMethodException("SSAA input dimensions");
                 harmony = new Harmony("com.rootdarkarchon.fuckthesefx.bloom-resolution");
                 harmony.Patch(method,
                     prefix: new HarmonyMethod(typeof(BloomResolutionIntegration), nameof(BeforeBloom)) { priority = Priority.First },
@@ -104,21 +91,9 @@ namespace FuckTheseFX.Source.Bloom
                     __state = new FrameState { Previous = current, Original = original };
                     current = __state;
                 }
-                if (!Plugin.BloomEnabled.Value || original == null || original.dimension != TextureDimension.Tex2D || original.volumeDepth != 1) return;
-                bool native = Plugin.BloomUseNativeResolution.Value;
-                float scale = Plugin.BloomInputScale.Value;
-                int nativeWidth = 0, nativeHeight = 0;
-                if (native)
-                {
-                    var ssaa = __instance.GetComponent(integration.ssaaType) as Behaviour;
-                    if (ssaa != null && ssaa.isActiveAndEnabled)
-                    {
-                        nativeWidth = (int)integration.inputWidth.Invoke(ssaa, null);
-                        nativeHeight = (int)integration.inputHeight.Invoke(ssaa, null);
-                    }
-                }
-                BloomResolutionPolicy.Resolve(original.width, original.height, scale, native,
-                    nativeWidth, nativeHeight, out int width, out int height);
+                if (original == null || original.dimension != TextureDimension.Tex2D || original.volumeDepth != 1) return;
+                float scale = Plugin.BloomInputScale.Value / 100f;
+                BloomResolutionPolicy.Resolve(original.width, original.height, scale, out int width, out int height);
                 if (width == original.width && height == original.height) return;
                 if (__state == null)
                 {

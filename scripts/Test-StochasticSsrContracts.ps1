@@ -11,23 +11,25 @@ try {
     $types=$assembly.MainModule.Types
     $plugin=$types | Where-Object FullName -eq 'FuckTheseFX.Plugin'
     $deps=@($plugin.CustomAttributes | Where-Object { $_.AttributeType.Name -eq 'BepInDependency' -and $_.ConstructorArguments[0].Value -eq 'com.matsix.ssrsix' })
-    if($deps.Count -ne 1 -or $deps[0].ConstructorArguments[1].Value -ne 2) { throw 'SSRSix soft dependency missing' }
+    if($deps.Count -ne 0) { throw 'Removed SSRSix soft dependency remains' }
     if($plugin.CustomAttributes | Where-Object { $_.AttributeType.Name -eq 'BepInDependency' -and $_.ConstructorArguments[0].Value -match 'ssrprototype' }) { throw 'Retired prototype detection must not ship' }
     if($types | Where-Object { $_.Namespace -eq 'FuckTheseFX.SsrPrototype' -or $_.Name -in @('PrototypePlugin','PrototypeHooks','ComparisonCapture') }) { throw 'Prototype diagnostic/plugin code leaked into release' }
     $integration=$types | Where-Object Name -eq 'StochasticSsrIntegration'
     $conflict=$integration.Methods | Where-Object Name -eq 'HasConflict'
-    if(-not ($conflict.Body.Instructions | Where-Object { $_.OpCode.Name -eq 'ldstr' -and $_.Operand -eq 'com.matsix.ssrsix' })) { throw 'SSRSix identity changed' }
+    if($conflict -or ($integration.Fields | Where-Object Name -eq 'SsrsixGuid')) { throw 'Removed SSRSix conflict detection remains' }
     $init=$integration.Methods | Where-Object Name -eq 'Initialize'
-    $guard=@($init.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.Name -eq 'HasConflict' })
     $load=@($init.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.Name -eq 'LoadFromFile' })
-    if($guard.Count -ne 1 -or $load.Count -ne 1 -or $guard[0].Offset -ge $load[0].Offset) { throw 'SSR compatibility gate must precede asset loading' }
+    if($load.Count -ne 1) { throw 'SSR asset loading missing' }
+    foreach($method in $integration.Methods | Where-Object HasBody) {
+        if($method.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.MethodReference] -and ($_.Operand.Name -eq 'HasConflict' -or $_.Operand.DeclaringType.FullName -eq 'BepInEx.Bootstrap.Chainloader') }) { throw 'Removed runtime SSR compatibility gate remains' }
+    }
     $pipeline=$types | Where-Object Name -eq 'SsrPipeline'
     if($pipeline.Methods | Where-Object Name -in @('CaptureDiagnostic','SnapshotNativeTrace','NativeCompose','Resolve','Filter','Finish','BuildReflectionMips')) { throw 'Research-only paths leaked into release pipeline' }
     $markers=$types | Where-Object { $_.Namespace -eq 'FuckTheseFX.Source.StochasticSSR' -and $_.Name -eq 'SsrGpuSample' }
     if($types | Where-Object Name -in @('FidelityDenoiser','AmdReflectionDenoiser','ReflectionDenoiser','ReflectionDirection','ReflectionDepthGapFill')) { throw 'Retired native-signal denoiser remains in release' }
     if($types | Where-Object Namespace -match 'CleanupBaseline|PerformanceBaseline|TraceOptimizationBaseline|ContinuationOptimizationBaseline|HistoryCopyBaseline|HistoryOwnershipBaseline|PreNrdStandard') {throw 'Validation-only baseline leaked into release'}
     $options=$types | Where-Object { $_.Namespace -eq 'FuckTheseFX.Source.StochasticSSR' -and $_.Name -eq 'Options' }
-    if(-not ($options.Fields | Where-Object Name -eq 'GlobalContinuedSky')) {throw 'Global continued-sky runtime option missing'}
+    if($options.Fields | Where-Object Name -in @('LimitNativeRange','Distance','BypassHitNormal','GlobalContinuedSky')) {throw 'Removed controls remain in runtime options'}
     if($options.Fields | Where-Object Name -in @('DdaForeground','SimpleMirrorTraversal')) {throw 'Removed traversal experiment remains in runtime options'}
     if($options.Fields | Where-Object Name -match 'Amd|Denoiser|Spatial|HitAware|GapFill|ForegroundSky|ForegroundAdjacent|ForegroundPermissiveness|Shallow|VarianceStrength|Direction|MatchCameraAspect|ConstrainHitToCell|HitNormalConfidenceOnly|RelaxOccluderReturn|SkyAfterContinuation') {throw 'Retired option fields remain'}
     $confidence=$types | Where-Object Name -eq 'SsrReflectionPipeline'
@@ -68,14 +70,14 @@ if($reflectionSource -match '_History|TemporalDisplay|CoverageDisplay|ExactSubtr
 $passes=@([regex]::Matches($reflectionSource,'#pragma fragment (\w+)') | ForEach-Object { $_.Groups[1].Value })
 if(($passes -join ',') -ne 'Resolve,Compose,ReplayInput,ComposeNormal') {throw 'Compacted reflection pass mapping changed'}
 $traceSource=Get-Content (Join-Path $repo 'unity/StochasticSSR/HiZ.compute') -Raw
-if($traceSource -match 'FTFX_DDA_FOREGROUND|foregroundDda|SimpleMirror|FTFX_SIMPLE_MIRROR|PrepareWaterNormals|_WaterNormal|_NormalFilter') {throw 'Removed traversal experiment remains in the release shader'}
+if($traceSource -match 'FTFX_BYPASS_HIT_NORMAL|BypassHitNormal|_GlobalContinuedSky|FTFX_DDA_FOREGROUND|foregroundDda|SimpleMirror|FTFX_SIMPLE_MIRROR|PrepareWaterNormals|_WaterNormal|_NormalFilter') {throw 'Removed traversal experiment remains in the release shader'}
 if($traceSource -notmatch '_ZeroSmoothnessProbe!=0 && smoothness==0' -or $traceSource.IndexOf('_ZeroSmoothnessProbe!=0 && smoothness==0') -ge $traceSource.IndexOf('direction=SampleReflectionVector')) {throw 'Experimental zero-smoothness receivers must bypass GGX before sampling'}
 if($reflectionSource -notmatch 'if\(ZeroSmoothnessProbeReceiver\(pixel\)\)return ZeroSmoothnessProbeScene\(pixel,scene\);') {throw 'Experimental probe replacement must bypass SSR reconstruction'}
-if($traceSource -notmatch '_GlobalContinuedSky==0 && !WaterPosition\(pixel,waterPoint\)') {throw 'Continued-sky receiver scope gate missing'}
+if($traceSource -match '_Clip\.w>\.5' -or $reflectionSource -match '_ReceiverRange') {throw 'Removed receiver range checks remain'}
 $pipelineSource=Get-Content (Join-Path $repo 'Source/StochasticSSR/SsrPipeline.cs') -Raw
-if($pipelineSource -notmatch '\(water!=null \|\| o.GlobalContinuedSky\) && continuedSkyKernel>=0') {throw 'Global continued sky must run without native water capture'}
 if($traceSource -notmatch '#pragma multi_compile_local _ FTFX_TRACE_DIAGNOSTICS' -or $traceSource -match '_DirectionMode|_HitNormalConfidenceOnly|_ConstrainHitToCell') {throw 'Diagnostic variant or fixed tracer behavior mismatch'}
 if($traceSource -notmatch '#pragma multi_compile_local _ FTFX_REJECTION_DIAGNOSTICS' -or $traceSource -match 'OctDecode') {throw 'Optional rejection diagnostic variant or shader cleanup mismatch'}
+if($pipelineSource -notmatch 'if\(continuedSkyKernel>=0\)') {throw 'All-receiver continued sky must run without water capture'}
 $rasterSource=Get-Content (Join-Path $repo 'Source/StochasticSSR/SsrRasterState.cs') -Raw
 $rasterShader=Get-Content (Join-Path $repo 'unity/StochasticSSR/RasterState.hlsl') -Raw
 if($rasterSource -notmatch 'ComputeBuffer\(16,16\)' -or $rasterSource -match 'Store\((16|20|24),' -or $rasterShader -match 'SsrRasterHistory|SsrHistoryUV') {throw 'Unused temporal raster uploads/helpers remain'}
