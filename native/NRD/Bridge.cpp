@@ -12,6 +12,7 @@
 #include <atomic>
 #include <string>
 #include <chrono>
+#include <cmath>
 #include "NRD.h"
 #include "Pack.h"
 #include "Unpack.h"
@@ -24,6 +25,8 @@ struct Frame {
     uint32_t reset, frames, frameIndex, antiFirefly;float deltaMs;
 };
 static_assert(sizeof(Frame)==292,"Managed frame ABI");
+struct DiffuseFrame { Frame camera; uint32_t version; float radius; uint32_t validation; };
+static_assert(sizeof(DiffuseFrame)==304,"Diffuse frame ABI");
 struct Stats { uint64_t permanentBytes, transientBytes, adapterBytes, frames, dispatches, failures; int32_t status, pending;double queueUs,eventUs; };
 static_assert(sizeof(Stats)==72,"Managed statistics ABI");
 using Clock=std::chrono::steady_clock;
@@ -59,6 +62,8 @@ DXGI_FORMAT Typed(DXGI_FORMAT format) {
     case DXGI_FORMAT_R32G32B32A32_TYPELESS:return DXGI_FORMAT_R32G32B32A32_FLOAT;
     case DXGI_FORMAT_R16G16_TYPELESS:return DXGI_FORMAT_R16G16_FLOAT;
     case DXGI_FORMAT_R32_TYPELESS:return DXGI_FORMAT_R32_FLOAT;
+    case DXGI_FORMAT_R10G10B10A2_TYPELESS:return DXGI_FORMAT_R10G10B10A2_UNORM;
+    case DXGI_FORMAT_R8G8B8A8_TYPELESS:return DXGI_FORMAT_R8G8B8A8_UNORM;
     default:return format;
     }
 }
@@ -108,6 +113,34 @@ struct StateGuard {
         if(depth)depth->Release();if(shader)shader->Release();
     }
 };
+// Diffuse views are immutable per resource generation. Packets copy COM ownership,
+// so replacing this cache cannot invalidate queued work during resize/disposal.
+struct DiffuseViews {
+    std::array<ComPtr<ID3D11Resource>,6> resources;
+    std::array<ComPtr<ID3D11ShaderResourceView>,4> inputs;
+    ComPtr<ID3D11ShaderResourceView> outputRead;
+    ComPtr<ID3D11UnorderedAccessView> output,motionWrite,validation;
+    bool Matches(void* const* textures)const {
+        for(size_t i=0;i<resources.size();i++)if(resources[i].Get()!=textures[i])return false;
+        return true;
+    }
+    explicit DiffuseViews(void* const* textures) {
+        for(size_t i=0;i<resources.size();i++)resources[i]=static_cast<ID3D11Resource*>(textures[i]);
+        ComPtr<ID3D11Device> device;resources[0]->GetDevice(&device);
+        auto srv=[&](size_t i,ComPtr<ID3D11ShaderResourceView>& result) {
+            D3D11_TEXTURE2D_DESC d{};static_cast<ID3D11Texture2D*>(resources[i].Get())->GetDesc(&d);
+            D3D11_SHADER_RESOURCE_VIEW_DESC v{};v.Format=Typed(d.Format);v.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;v.Texture2D.MipLevels=1;
+            Check(device->CreateShaderResourceView(resources[i].Get(),&v,&result));
+        };
+        auto uav=[&](size_t i,ComPtr<ID3D11UnorderedAccessView>& result) {
+            D3D11_TEXTURE2D_DESC d{};static_cast<ID3D11Texture2D*>(resources[i].Get())->GetDesc(&d);
+            D3D11_UNORDERED_ACCESS_VIEW_DESC v{};v.Format=Typed(d.Format);v.ViewDimension=D3D11_UAV_DIMENSION_TEXTURE2D;
+            Check(device->CreateUnorderedAccessView(resources[i].Get(),&v,&result));
+        };
+        for(size_t i=0;i<4;i++)srv(i,inputs[i]);
+        srv(4,outputRead);uav(4,output);uav(3,motionWrite);if(resources[5])uav(5,validation);
+    }
+};
 struct Backend {
     nrd::Instance* instance=nullptr;uint32_t width,height;ComPtr<ID3D11Device> device;
     std::vector<Texture> permanent,transient;std::vector<ComPtr<ID3D11ComputeShader>> shaders;
@@ -115,10 +148,11 @@ struct Backend {
     ComPtr<ID3D11ComputeShader> pack,unpack;ComPtr<ID3D11Buffer> cb,adapterCb;
     std::array<ComPtr<ID3D11SamplerState>,2> samplers;
     Stats stats{};
-    std::string error;
-    Backend(uint32_t w,uint32_t h):width(w),height(h) {
+    std::string error; bool diffuse=false;
+    std::unique_ptr<DiffuseViews> diffuseViews;uint64_t viewBuilds=0;
+    Backend(uint32_t w,uint32_t h,bool diff=false):width(w),height(h),diffuse(diff) {
         nrd::DenoiserDesc methods[]={{1,nrd::Denoiser::REBLUR_SPECULAR},{2,nrd::Denoiser::REBLUR_SPECULAR}};
-        nrd::InstanceCreationDesc d{};d.denoisers=methods;d.denoisersNum=2;Check(nrd::CreateInstance(d,instance));
+        nrd::InstanceCreationDesc d{};d.denoisers=methods;d.denoisersNum=diffuse?1:2;if(diffuse)methods[0].denoiser=nrd::Denoiser::REBLUR_DIFFUSE;Check(nrd::CreateInstance(d,instance));
     }
     ~Backend(){if(instance)nrd::DestroyInstance(*instance);}
     void Init(ID3D11Device* dev) {
@@ -134,11 +168,12 @@ struct Backend {
             }
         };
         pools(d.permanentPool,d.permanentPoolSize,permanent,stats.permanentBytes);pools(d.transientPool,d.transientPoolSize,transient,stats.transientBytes);
-        normal.Init(dev,width,height,DXGI_FORMAT_R10G10B10A2_UNORM);z.Init(dev,width,height,DXGI_FORMAT_R32_FLOAT);
+        if(!diffuse) { normal.Init(dev,width,height,DXGI_FORMAT_R10G10B10A2_UNORM);z.Init(dev,width,height,DXGI_FORMAT_R32_FLOAT);
         motion.Init(dev,width,height,DXGI_FORMAT_R16G16B16A16_FLOAT);
         for(auto* t:{&colour,&coverage,&outColour,&outCoverage})t->Init(dev,width,height,DXGI_FORMAT_R16G16B16A16_FLOAT);
         for(auto* t:{&normal,&z,&motion,&colour,&coverage,&outColour,&outCoverage})stats.adapterBytes+=t->bytes;
         Check(dev->CreateComputeShader(FTFX_Pack,sizeof(FTFX_Pack),nullptr,&pack));Check(dev->CreateComputeShader(FTFX_Unpack,sizeof(FTFX_Unpack),nullptr,&unpack));
+        }
         D3D11_BUFFER_DESC b{};b.ByteWidth=(d.constantBufferMaxDataSize+15)&~15u;b.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
         Check(dev->CreateBuffer(&b,nullptr,&cb));b.ByteWidth=16;Check(dev->CreateBuffer(&b,nullptr,&adapterCb));
         for(UINT i=0;i<2;i++) {
@@ -163,7 +198,8 @@ struct Backend {
 };
 struct Packet {
     uintptr_t owner=0;std::shared_ptr<Backend> backend;Frame frame{};
-    std::array<ComPtr<ID3D11ShaderResourceView>,4> inputs;ComPtr<ID3D11UnorderedAccessView> output;
+    std::array<ComPtr<ID3D11ShaderResourceView>,4> inputs;ComPtr<ID3D11ShaderResourceView> outputRead;
+    ComPtr<ID3D11UnorderedAccessView> output,validation,motionWrite; float radius=1; bool validate=false;
 };
 std::mutex gate;uintptr_t serial=0;
 std::unordered_map<uintptr_t,std::shared_ptr<Backend>> backends;
@@ -176,11 +212,13 @@ void Run(Packet& p) {
     auto& b=*p.backend;ComPtr<ID3D11Device> dev;p.inputs[0]->GetDevice(&dev);
     if(!b.device)b.Init(dev.Get());if(b.device.Get()!=dev.Get())throw std::runtime_error("D3D11 device changed");
     ComPtr<ID3D11DeviceContext> c;dev->GetImmediateContext(&c);StateGuard saved(c.Get());
-    uint32_t constants[]={b.width,b.height,0,0};c->UpdateSubresource(b.adapterCb.Get(),0,nullptr,constants,0,0);
-    ID3D11Buffer* adapter=b.adapterCb.Get();c->CSSetConstantBuffers(0,1,&adapter);c->CSSetShader(b.pack.Get(),nullptr,0);
+    ID3D11Buffer* adapter=b.adapterCb.Get();
+    if(!b.diffuse) { uint32_t constants[]={b.width,b.height,0,0};c->UpdateSubresource(b.adapterCb.Get(),0,nullptr,constants,0,0);
+    c->CSSetConstantBuffers(0,1,&adapter);c->CSSetShader(b.pack.Get(),nullptr,0);
     ID3D11ShaderResourceView* input[]={p.inputs[0].Get(),p.inputs[1].Get(),p.inputs[2].Get(),p.inputs[3].Get()};
     ID3D11UnorderedAccessView* targets[]={b.normal.uav.Get(),b.z.uav.Get(),b.motion.uav.Get(),b.colour.uav.Get(),b.coverage.uav.Get()};
     c->CSSetShaderResources(0,4,input);c->CSSetUnorderedAccessViews(0,5,targets,nullptr);c->Dispatch((b.width+7)/8,(b.height+7)/8,1);NullBindings(c.Get());
+    }
     nrd::CommonSettings s{};
     memcpy(s.viewToClipMatrix,p.frame.projection,64);memcpy(s.viewToClipMatrixPrev,p.frame.previousProjection,64);
     memcpy(s.worldToViewMatrix,p.frame.view,64);memcpy(s.worldToViewMatrixPrev,p.frame.previousView,64);
@@ -188,6 +226,7 @@ void Run(Packet& p) {
     s.resourceSize[0]=s.resourceSizePrev[0]=s.rectSize[0]=s.rectSizePrev[0]=uint16_t(b.width);
     s.resourceSize[1]=s.resourceSizePrev[1]=s.rectSize[1]=s.rectSizePrev[1]=uint16_t(b.height);
     s.frameIndex=p.frame.frameIndex;s.timeDeltaBetweenFrames=p.frame.deltaMs;s.denoisingRange=1e6f;
+    s.enableValidation=b.diffuse && p.validate;
     s.accumulationMode=p.frame.reset||b.stats.frames==0?nrd::AccumulationMode::CLEAR_AND_RESTART:nrd::AccumulationMode::CONTINUE;
     Check(nrd::SetCommonSettings(*b.instance,s));nrd::ReblurSettings settings{};
     settings.maxAccumulatedFrameNum=p.frame.frames;settings.maxFastAccumulatedFrameNum=std::min(6u,p.frame.frames);
@@ -197,9 +236,11 @@ void Run(Packet& p) {
     // Zero distance denotes unavailable geometry. No probabilistic hit-distance
     // reconstruction is enabled: SSR misses are not skipped GGX lobe samples.
     settings.hitDistanceReconstructionMode=nrd::HitDistanceReconstructionMode::OFF;
-    Check(nrd::SetDenoiserSettings(*b.instance,1,&settings));Check(nrd::SetDenoiserSettings(*b.instance,2,&settings));
+    if(b.diffuse) { settings.hitDistanceParameters.A=p.radius;settings.hitDistanceParameters.B=0;settings.hitDistanceParameters.C=1;
+        settings.diffusePrepassBlurRadius=8;settings.maxBlurRadius=16;settings.minBlurRadius=1; }
+    Check(nrd::SetDenoiserSettings(*b.instance,1,&settings));if(!b.diffuse)Check(nrd::SetDenoiserSettings(*b.instance,2,&settings));
     nrd::Identifier ids[]={1,2};const nrd::DispatchDesc* dispatches=nullptr;uint32_t count=0;
-    Check(nrd::GetComputeDispatches(*b.instance,ids,2,dispatches,count));const auto& desc=*nrd::GetInstanceDesc(*b.instance);
+    Check(nrd::GetComputeDispatches(*b.instance,ids,b.diffuse?1:2,dispatches,count));const auto& desc=*nrd::GetInstanceDesc(*b.instance);
     ID3D11SamplerState* samplers[]={b.samplers[0].Get(),b.samplers[1].Get()};c->CSSetSamplers(desc.samplersBaseRegisterIndex,2,samplers);
     ID3D11Buffer* cb=b.cb.Get();c->CSSetConstantBuffers(desc.constantBufferRegisterIndex,1,&cb);
     std::vector<uint8_t> constantData((desc.constantBufferMaxDataSize+15)&~15u);
@@ -207,7 +248,27 @@ void Run(Packet& p) {
         const auto& d=dispatches[i];NullBindings(c.Get());
         std::array<ID3D11ShaderResourceView*,32> srvs{};std::array<ID3D11UnorderedAccessView*,8> uavs{};UINT ns=0,nu=0;
         for(UINT j=0;j<d.resourcesNum;j++) {
-            const auto& r=d.resources[j];auto& texture=b.Resource(r,d.identifier);
+            const auto& r=d.resources[j];
+            if(b.diffuse) {
+                int input=-1;
+                switch(r.type) {
+                case nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST:input=0;break;
+                case nrd::ResourceType::IN_NORMAL_ROUGHNESS:input=1;break;
+                case nrd::ResourceType::IN_VIEWZ:input=2;break;
+                case nrd::ResourceType::IN_MV:input=3;break;
+                case nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST:
+                    if(r.descriptorType==nrd::DescriptorType::TEXTURE)srvs.at(ns++)=p.outputRead.Get();else uavs.at(nu++)=p.output.Get();continue;
+                case nrd::ResourceType::OUT_VALIDATION:uavs.at(nu++)=p.validation.Get();continue;
+                default:break;
+                }
+                if(input>=0){
+                    if(r.descriptorType==nrd::DescriptorType::TEXTURE)srvs.at(ns++)=p.inputs[input].Get();
+                    else if(input==3)uavs.at(nu++)=p.motionWrite.Get();
+                    else throw std::runtime_error("Unexpected writable diffuse input");
+                    continue;
+                }
+            }
+            auto& texture=b.Resource(r,d.identifier);
             if(r.descriptorType==nrd::DescriptorType::TEXTURE){if(ns>=32)throw std::runtime_error("SRV overflow");srvs[ns++]=texture.srv.Get();}
             else {if(nu>=8)throw std::runtime_error("UAV overflow");uavs[nu++]=texture.uav.Get();}
         }
@@ -215,6 +276,7 @@ void Run(Packet& p) {
         c->CSSetShaderResources(desc.resourcesBaseRegisterIndex,ns,srvs.data());c->CSSetUnorderedAccessViews(desc.resourcesBaseRegisterIndex,nu,uavs.data(),nullptr);
         c->CSSetShader(b.shaders.at(d.pipelineIndex).Get(),nullptr,0);c->Dispatch(d.gridWidth,d.gridHeight,1);
     }
+    if(b.diffuse){NullBindings(c.Get());b.stats.frames++;b.stats.dispatches=count;return;}
     NullBindings(c.Get());c->CSSetShader(b.unpack.Get(),nullptr,0);c->CSSetConstantBuffers(0,1,&adapter);
     ID3D11ShaderResourceView* decoded[]={b.outColour.srv.Get(),b.outCoverage.srv.Get(),p.inputs[2].Get(),p.inputs[0].Get()};
     ID3D11UnorderedAccessView* out=p.output.Get();c->CSSetShaderResources(0,4,decoded);c->CSSetUnorderedAccessViews(0,1,&out,nullptr);
@@ -230,7 +292,8 @@ void __stdcall Event(int event,void* token) {
     if(b.stats.status<0){
         ComPtr<ID3D11Device> dev;packet->output->GetDevice(&dev);ComPtr<ID3D11DeviceContext> c;dev->GetImmediateContext(&c);
         ComPtr<ID3D11Resource> source,target;packet->inputs[0]->GetResource(&source);packet->output->GetResource(&target);
-        c->CopyResource(target.Get(),source.Get()); // Current-frame safe unfiltered fallback.
+        if(b.diffuse){float zero[4]={};c->ClearUnorderedAccessViewFloat(packet->output.Get(),zero);}
+        else c->CopyResource(target.Get(),source.Get()); // SSR current-frame fallback only.
     }
 }
 }
@@ -262,7 +325,8 @@ API uintptr_t __cdecl FTFX_NrdQueue(uintptr_t id,void* signal,void* normal,void*
         for(UINT i=0;i<4;i++){
             if(!textures[i])return 0;D3D11_TEXTURE2D_DESC desc{};static_cast<ID3D11Texture2D*>(textures[i])->GetDesc(&desc);
             D3D11_SHADER_RESOURCE_VIEW_DESC srv{};srv.Format=Typed(desc.Format);srv.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;srv.Texture2D.MipLevels=1;
-            Check(device->CreateShaderResourceView(static_cast<ID3D11Resource*>(textures[i]),&srv,&p->inputs[i]));
+            HRESULT result=device->CreateShaderResourceView(static_cast<ID3D11Resource*>(textures[i]),&srv,&p->inputs[i]);
+            if(FAILED(result))throw std::runtime_error("NRD input "+std::to_string(i)+" format "+std::to_string(desc.Format)+" SRV HRESULT="+std::to_string(uint32_t(result)));
         }
         D3D11_TEXTURE2D_DESC desc{};static_cast<ID3D11Texture2D*>(output)->GetDesc(&desc);
         D3D11_UNORDERED_ACCESS_VIEW_DESC uav{};uav.Format=Typed(desc.Format);uav.ViewDimension=D3D11_UAV_DIMENSION_TEXTURE2D;
@@ -281,4 +345,29 @@ API int __cdecl FTFX_NrdStats(uintptr_t id,Stats* stats) {
 API void __cdecl FTFX_NrdError(uintptr_t id,char* text,uint32_t size) {
     std::lock_guard<std::mutex> lock(gate);auto b=backends.find(id);if(!size)return;
     const char* error=b==backends.end()?"missing instance":b->second->error.c_str();strncpy_s(text,size,error,_TRUNCATE);
+}
+
+API int __cdecl FTFX_NrdDiffuseAbi(){return sizeof(DiffuseFrame);}
+API uintptr_t __cdecl FTFX_NrdDiffuseCreate(uint32_t w,uint32_t h,uint32_t version) {
+    std::lock_guard<std::mutex> lock(gate);if(version!=1||!w||!h||w>65535||h>65535)return 0;
+    try{auto id=++serial;backends[id]=std::make_shared<Backend>(w,h,true);return id;}catch(...){return 0;}
+}
+API uintptr_t __cdecl FTFX_NrdDiffuseQueue(uintptr_t id,void* radiance,void* normal,void* depth,void* motion,void* output,void* validation,const DiffuseFrame* f) {
+    auto start=Clock::now();std::lock_guard<std::mutex> lock(gate);
+    auto found=backends.find(id);if(found==backends.end()||!found->second->diffuse)return 0;auto& b=*found->second;
+    if(!f||f->version!=1||!std::isfinite(f->radius)||f->radius<=0||f->camera.frames>63||!radiance||!normal||!depth||!motion||!output||(f->validation&&!validation))return 0;
+    try {
+        void* textures[]={radiance,normal,depth,motion,output,f->validation?validation:nullptr};
+        if(!b.diffuseViews||!b.diffuseViews->Matches(textures)){b.diffuseViews=std::make_unique<DiffuseViews>(textures);b.viewBuilds++;}
+        auto p=std::make_unique<Packet>();p->owner=id;p->backend=found->second;p->frame=f->camera;p->radius=f->radius;p->validate=f->validation!=0;
+        const auto& views=*b.diffuseViews;p->inputs=views.inputs;p->output=views.output;p->outputRead=views.outputRead;p->motionWrite=views.motionWrite;p->validation=views.validation;
+        auto token=++serial;packets[token]=std::move(p);b.stats.queueUs=Us(start);return token;
+    }catch(const std::exception& e){b.error=e.what();b.stats.status=-1;b.stats.failures++;return 0;}
+}
+API uint64_t __cdecl FTFX_NrdDiffuseViewBuilds(uintptr_t id) {
+    std::lock_guard<std::mutex> lock(gate);auto b=backends.find(id);return b==backends.end()?0:b->second->viewBuilds;
+}
+API void __cdecl FTFX_NrdDiffuseUpdate(uintptr_t token,const DiffuseFrame* f) {
+    if(!f||f->version!=1)return;std::lock_guard<std::mutex> lock(gate);auto p=packets.find(token);
+    if(p!=packets.end()){p->second->frame=f->camera;p->second->radius=f->radius;}
 }

@@ -18,6 +18,7 @@ public static partial class OcclusionValidation
   {
    typeof(BepInEx.Paths).GetProperty("BepInExConfigPath").GetSetMethod(true).Invoke(null,new object[]{Path.GetFullPath("bepinex.cfg")});
    PlayerSettings.colorSpace=ColorSpace.Linear;
+   FuckTheseFX.Plugin.MyLog.LogEvent+=(sender,entry)=>Debug.Log(entry.Data);
    AssetDatabase.Refresh();
    var shaders=new[]{"Assets/XeGTAO/Composite.shader","Assets/CustomAmbient.shader","Assets/XeGTAO/ColorBleed.shader"};
    foreach(var path in shaders)
@@ -25,8 +26,9 @@ public static partial class OcclusionValidation
     var shader=AssetDatabase.LoadAssetAtPath<Shader>(path);
     Require(shader!=null && !ShaderUtil.ShaderHasError(shader),"shader compilation: "+path);
    }
-   var build=new AssetBundleBuild { assetBundleName="occlusion",assetNames=shaders.Concat(new[]{"Assets/XeGTAO/XeGTAO.compute"}).ToArray() };
+   var build=new AssetBundleBuild { assetBundleName="occlusion",assetNames=shaders.Concat(new[]{"Assets/XeGTAO/XeGTAO.compute","Assets/XeGTAO/ContactGI.compute","Assets/AMD/BlueNoise.bytes"}).ToArray() };
    Require(BuildPipeline.BuildAssetBundles("Output/Assets",new[]{build},BuildAssetBundleOptions.ForceRebuildAssetBundle,BuildTarget.StandaloneWindows64)!=null,"bundle build");
+   NrdDiffuseBackend.ValidationLibrary=Path.GetFullPath("Output/FTFXNrd.dll");
    NativeRouting();
    using(var assets=new GpuAssets(Path.GetFullPath("Output/Plugin.dll")))
    {
@@ -45,12 +47,9 @@ public static partial class OcclusionValidation
     ActorEquivalence(assets,256,144);
     ActorEquivalence(assets,259,147);
     CameraLifecycle(assets);
-    ColorBleedShaders(assets);
-    ColorBleedFilter(assets);
-    ColorBleedTemporal(assets);
-    ColorBleedTemporalCamera(assets);
-    ColorBleedCamera(assets);
-    ColorBleedGammaCamera(assets);
+    NrdDiffuseValidation(assets);
+    ContactGIHierarchyValidation(assets);
+    ContactGICameraValidation(assets);
    }
    File.WriteAllLines("validation.txt",results);
    Debug.Log(string.Join("\n",results));

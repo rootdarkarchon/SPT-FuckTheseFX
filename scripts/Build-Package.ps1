@@ -26,6 +26,9 @@ function Get-WorkingTreeHash([string]$RepositoryRoot) {
     } finally { $sha256.Dispose() }
 }
 $workingTreeHash = Get-WorkingTreeHash $repo
+# Explicit user-requested full-Git-HEAD testing package identity. Retain dirty-source integrity checks.
+$gitHead = (& git -C $repo rev-parse HEAD).Trim()
+if ($gitHead -notmatch '^[0-9a-f]{40}$') { throw 'Cannot resolve full Git HEAD for the requested package name' }
 $assets = @('distantshadows','occlusion','stochasticssr','water')
 & dotnet build (Join-Path $repo 'FuckTheseFX.csproj') -c Release "-p:SptInstallPath=$SptInstallPath" --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
@@ -81,6 +84,13 @@ $receipt = Get-Item (Join-Path $repo 'obj/NrdStandardValidation/validation.txt')
 foreach ($file in @('obj/NRD/bridge/Release/FTFXNrd.dll','Source/StochasticSSR/NrdSpecularBackend.cs','unity/StochasticSSR/NrdInputs.shader','unity/StochasticSsrValidation/NrdStandardValidation.cs')) {
     if ((Get-Item (Join-Path $repo $file)).LastWriteTimeUtc -gt $receipt.LastWriteTimeUtc) { throw "NRD validation is stale: $file" }
 }
+$diffuseReceipt = Get-Item (Join-Path $repo 'obj/OcclusionValidation/validation.txt')
+foreach ($file in @('obj/NRD/bridge/Release/FTFXNrd.dll','Source/Occlusion/ColorBleedPipeline.cs','Source/Occlusion/NrdDiffuseBackend.cs','Source/Occlusion/ContactGICapture.cs','unity/Assets/XeGTAO/ContactGI.compute','unity/Assets/XeGTAO/ContactGICommon.hlsl','unity/Assets/XeGTAO/ColorBleed.shader','unity/OcclusionValidation/NrdDiffuseValidation.cs','unity/OcclusionValidation/ContactGICameraValidation.cs','unity/OcclusionValidation/ContactGIPerformanceValidation.cs')) {
+    if ((Get-Item (Join-Path $repo $file)).LastWriteTimeUtc -gt $diffuseReceipt.LastWriteTimeUtc) { throw "Diffuse validation is stale: $file" }
+}
+if (-not ((Get-Content $diffuseReceipt.FullName) -match 'actual NRD diffuse native execution')) { throw 'Diffuse native execution receipt missing' }
+$diffuseInputs=Get-Content (Join-Path $repo 'obj/OcclusionValidation/diffuse-inputs.json') -Raw|ConvertFrom-Json
+foreach($inputFile in $diffuseInputs.PSObject.Properties){if((Get-FileHash -LiteralPath (Join-Path $repo $inputFile.Name)).Hash -ne $inputFile.Value){throw "Diffuse validation input hash mismatch: $($inputFile.Name)"}}
 # Packages contain runtime files and required copyright/license texts only.
 # Manuals, test instructions and upstream provenance stay in the repository.
 $allowedEntries = @(
@@ -93,7 +103,7 @@ foreach ($entry in $expected.Keys) {
     if ($entry -notin $allowedEntries) { throw "Non-runtime file prohibited in FTFX package: $entry" }
 }
 if ((Get-WorkingTreeHash $repo) -ne $workingTreeHash) { throw 'Working tree changed during build; rebuild before packaging' }
-$zip = Join-Path $repo "bin\Release\FuckTheseFX-$version-SPT4.1-$workingTreeHash.zip"
+$zip = Join-Path $repo "bin\Release\FuckTheseFX-$version-SPT4.1-$gitHead.zip"
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 # FileMode.Create replaces this exact generated artifact without touching other files.
 $file = [IO.File]::Open($zip, [IO.FileMode]::Create)
@@ -118,3 +128,5 @@ try {
 Get-FileHash -LiteralPath $zip -Algorithm SHA256
 
 
+
+@{version=$version;gitHead=$gitHead;workingTreeHash=$workingTreeHash;zipSha256=(Get-FileHash -LiteralPath $zip).Hash;sscgiAcceptance='APPROVED by user on 2026-10-04 following in-game visual review and GPU on/off comparisons';releaseAcceptance='SSCGI approved; local package and runtime contract checks passed'} | ConvertTo-Json | Set-Content ($zip+'.receipt.json')

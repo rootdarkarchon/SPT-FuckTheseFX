@@ -1,0 +1,135 @@
+#pragma kernel Reduce
+#pragma kernel Reduce2
+#pragma kernel Reduce3
+#pragma kernel PrepareGeometry
+#pragma kernel Trace
+#pragma only_renderers d3d11
+#include "ContactGICommon.hlsl"
+Texture2D<float> _ReduceInput;
+RWTexture2D<float> _ReduceOutput;
+int2 _ReduceSize;
+[numthreads(8,8,1)] void Reduce(uint2 p:SV_DispatchThreadID) {
+ uint w,h;_ReduceOutput.GetDimensions(w,h);if(p.x>=w||p.y>=h)return;
+ int2 s=p*2,m=_ReduceSize-1;
+ _ReduceOutput[p]=min(min(_ReduceInput.Load(int3(min(s,m),0)),_ReduceInput.Load(int3(min(s+int2(1,0),m),0))),min(_ReduceInput.Load(int3(min(s+int2(0,1),m),0)),_ReduceInput.Load(int3(min(s+1,m),0))));
+}
+// Each workgroup owns an 8x8 / 4x4 / 2x2 output region. No group reads
+// another group's writes. Replicated edge lanes preserve ceil-sized odd mips.
+RWTexture2D<float> _ReduceSecond,_ReduceThird;
+groupshared float firstLevel[64],secondLevel[16];
+void ReduceGroup(uint2 local,uint2 group,uint tid,uint levels) {
+ uint2 firstSize=((uint2)_ReduceSize+1)>>1,secondSize=(firstSize+1)>>1,thirdSize=(secondSize+1)>>1;
+ uint2 q=group*8+local,clamped=min(q,firstSize-1);int2 a=clamped*2,m=_ReduceSize-1;
+ float value=min(min(_ReduceInput.Load(int3(min(a,m),0)),_ReduceInput.Load(int3(min(a+int2(1,0),m),0))),min(_ReduceInput.Load(int3(min(a+int2(0,1),m),0)),_ReduceInput.Load(int3(min(a+1,m),0))));
+ firstLevel[tid]=value;if(all(q<firstSize))_ReduceOutput[q]=value;
+ GroupMemoryBarrierWithGroupSync();
+ if(all((local&1)==0)) {
+  uint2 q2=group*4+local/2,base=(min(q2,secondSize-1)*2-group*8);uint i=base.y*8+base.x;
+  value=min(min(firstLevel[i],firstLevel[i+1]),min(firstLevel[i+8],firstLevel[i+9]));
+  secondLevel[(local.y/2)*4+local.x/2]=value;if(all(q2<secondSize))_ReduceSecond[q2]=value;
+ }
+ GroupMemoryBarrierWithGroupSync();
+ if(levels==3&&all((local&3)==0)) {
+  uint2 q3=group*2+local/4;uint i=(local.y/2)*4+local.x/2;
+  value=min(min(secondLevel[i],secondLevel[i+1]),min(secondLevel[i+4],secondLevel[i+5]));if(all(q3<thirdSize))_ReduceThird[q3]=value;
+ }
+}
+[numthreads(8,8,1)]void Reduce2(uint2 local:SV_GroupThreadID,uint2 group:SV_GroupID,uint tid:SV_GroupIndex){ReduceGroup(local,group,tid,2);}
+[numthreads(8,8,1)]void Reduce3(uint2 local:SV_GroupThreadID,uint2 group:SV_GroupID,uint tid:SV_GroupIndex){ReduceGroup(local,group,tid,3);}
+// A full-precision cached guide reproduces the old reconstruction's geometric
+// normal, including its fallback to the *stored* packed NRD shading guide.
+Texture2D<float4> _StoredNormal;
+Texture2D<float> _StoredViewZ;
+RWTexture2D<float4> _Geometry;
+[numthreads(8,8,1)]void PrepareGeometry(uint2 q:SV_DispatchThreadID) {
+ if(any(q>=(uint2)_GISize.zw))return;float z=_StoredViewZ.Load(int3(q,0));
+ float3 sn=NRD_FrontEnd_UnpackNormalAndRoughness(_StoredNormal.Load(int3(q,0))).xyz;
+ _Geometry[q]=float4(z<1e6?GIGeometric((q+.5)/_GISize.zw,z,sn):0,0);
+}
+Texture2D<float> _HiZ1,_HiZ2,_HiZ3,_HiZ4,_HiZ5,_HiZ6,_HiZ7,_HiZ8,_HiZ9,_HiZ10,_HiZ11,_HiZ12,_HiZ13,_HiZ14;
+Texture2D<float4> _GISource;
+Texture2D<float2> _BlueNoise,_CameraMotionVectorsTexture;
+RWTexture2D<float4> _Radiance,_Normal,_Motion,_TraceInfo;
+RWTexture2D<float> _ViewZ;
+int _MaxMip,_RayCount,_MaxSteps,_Diagnose;
+float HiZ(int2 p,int level) {
+ switch(level) {case 0:return _GIDepth.Load(int3(p,0));case 1:return _HiZ1.Load(int3(p,0));case 2:return _HiZ2.Load(int3(p,0));case 3:return _HiZ3.Load(int3(p,0));case 4:return _HiZ4.Load(int3(p,0));case 5:return _HiZ5.Load(int3(p,0));case 6:return _HiZ6.Load(int3(p,0));case 7:return _HiZ7.Load(int3(p,0));case 8:return _HiZ8.Load(int3(p,0));case 9:return _HiZ9.Load(int3(p,0));case 10:return _HiZ10.Load(int3(p,0));case 11:return _HiZ11.Load(int3(p,0));case 12:return _HiZ12.Load(int3(p,0));case 13:return _HiZ13.Load(int3(p,0));default:return _HiZ14.Load(int3(p,0));}
+}
+// First 32 points of 2D Sobol. Spatial scrambling is fixed blue noise; each
+// complete cycle receives one global Cranley-Patterson shift.
+float2 GISample(int2 pixel,uint index) {
+ uint i=index&31,gray=i^(i>>1),x=0,y=0;uint v[5]={16,24,20,30,17};
+ [unroll]for(uint b=0;b<5;b++){if(gray&(1u<<b)){x^=16u>>b;y^=v[b];}}
+ float2 noise=(_BlueNoise.Load(int3(pixel&127,0))*255+.5)/256;
+ return frac((float2(x,y)+.5)/32+noise+_GIRaster[16].zw);
+}
+float3 GICosine(float2 s,float3 n) {
+ float3 t=normalize(cross(abs(n.z)<.999?float3(0,0,1):float3(0,1,0),n));
+ float phi=6.283185307*s.y,r=sqrt(s.x);return t*(r*cos(phi))+cross(n,t)*(r*sin(phi))+n*sqrt(1-s.x);
+}
+// Solve the projected cell boundary analytically along a perspective ray.
+float Boundary(float4 a,float4 b,float2 boundary,bool x) {
+ float k=(x?boundary.x:boundary.y)*2-1;
+ float numerator=k*a.w-(x?a.x:a.y),denominator=(x?b.x:b.y)-k*b.w;
+ return abs(denominator)>1e-10?numerator/denominator:1e20;
+}
+uint TraceRay(float3 receiver,float3 direction,out float distance,out int2 hit,out uint steps) {
+ distance=0;hit=0;steps=0;float radius=_GISettings.x,bias=max(.001,_GISettings.z*.05),t=bias;
+ float3 p=receiver;int level=min(_MaxMip,3);uint flags=0;
+ float4 projectedOrigin=mul(RasterMatrix(0),float4(p,1)),projectedDirection=mul(RasterMatrix(0),float4(direction,0));
+ float2 uv0=GIProject(p), uv1=GIProject(p+direction*radius);float2 signUV=sign(uv1-uv0);
+ [loop]for(uint iter=0;iter<(uint)_MaxSteps;iter++) {
+  steps++;float3 q=p+direction*t;if(q.z>=-1e-5)return flags|4;
+  float2 uv=GIProject(q);if(any(uv<=0)||any(uv>=1))return flags|4;
+  int scale=1<<level;int2 cell=int2(uint2(uv*_GISize.xy)>>level);
+  float2 boundary=(cell+(signUV>0?1:0))*scale/_GISize.xy;
+  float tx=Boundary(projectedOrigin,projectedDirection,boundary,true),ty=Boundary(projectedOrigin,projectedDirection,boundary,false);
+  if(tx<=t+1e-6)tx=1e20;if(ty<=t+1e-6)ty=1e20;
+  float end=min(radius,min(tx,ty));float z=HiZ(cell,level);
+  if(z>0 && max(-q.z,-(p+direction*end).z)>=z-bias) {
+   if(level>0){level--;continue;}
+   float a=t,b=end;float fa=-q.z-z,fb=-(p+direction*b).z-z;
+   // First depth crossing, refined inside this full-resolution cell. A ray
+   // starting substantially behind a surface has no reliable visible endpoint.
+   if(fa<=GITolerance(z) && fb>=-bias) {
+    [unroll]for(int j=0;j<5;j++){float m=(a+b)*.5;if(-(p+direction*m).z<z)a=m;else b=m;}
+    float candidate=fa>=0?t:(a+b)*.5;
+    if(candidate<=bias*2 || length(cell-GIFullPixel(uv0))<1.5){flags|=8;}
+    else if(abs(-(p+direction*candidate).z-z)<=GITolerance(z)) {distance=candidate;hit=cell;return flags|1;}
+   } else if(fa>GITolerance(z)) return flags|16;
+  }
+  if(end>=radius)return flags|2;
+  t=end+max(1e-5,end*1e-5);level=min(level+1,_MaxMip);
+ }
+ return flags|16;
+}
+[numthreads(8,8,1)] void Trace(uint2 q:SV_DispatchThreadID) {
+ bool inside=all(q<(uint2)_GISize.zw);float2 uv=(q+.5)/_GISize.zw;int2 p=GIFullPixel(uv);float z=_GIDepth.Load(int3(p,0));
+ bool eligible=inside && GIEligible(uv,z);
+ if(!inside)return;
+ _Radiance[q]=0;_Normal[q]=NRD_FrontEnd_PackNormalAndRoughness(float3(0,0,1),1,0);_ViewZ[q]=1e7;_Motion[q]=0;
+ if(_Diagnose)_TraceInfo[q]=0;
+ if(!eligible)return;
+ float3 normal=GIShading(p),geometric=GIGeometric(uv,z,normal),receiver=GIPosition(uv,z),radiance=0;
+ float dist=0;uint hits=0,flags=0,work=0;
+ uint frame=(uint)_GIRaster[16].x|((uint)_GIRaster[16].y<<16);
+ [loop]for(uint ray=0;ray<(uint)_RayCount;ray++) {
+  float3 dw=GICosine(GISample(p,frame*(uint)_RayCount+ray),normal);
+  if(dot(dw,geometric)<=0){flags|=32;continue;}
+  float3 direction=mul((float3x3)RasterMatrix(12),dw);float ht;int2 hp;uint steps;
+  uint status=TraceRay(receiver,direction,ht,hp,steps);flags|=status;work+=steps;
+  if(status&1) {
+   hits++;dist+=ht; // Black donors and blocking actors still have geometry.
+   if(_GIActors.Load(int3(hp,0))<.5) {
+    float4 spec=_CameraGBufferTexture1.Load(int3(hp,0));float3 dn=GIShading(hp);
+    float glossy=(1-smoothstep(.65,.95,spec.a))*(1-saturate(max(GIDecode(spec.rgb).r,max(GIDecode(spec.rgb).g,GIDecode(spec.rgb).b))));
+    if(dot(dn,dw)<0)radiance+=GILimit(GIDecode(_GISource.Load(int3(hp,0)).rgb),_GILimits.x)*glossy*pow(saturate(1-ht/_GISettings.x),2);
+   }
+  }
+ }
+ float distance=hits?dist/hits:0;
+ _Radiance[q]=REBLUR_FrontEnd_PackRadianceAndNormHitDist(radiance/_RayCount,REBLUR_FrontEnd_GetNormHitDist(distance,z,float3(_GISettings.x,0,1),1),true);
+ _Normal[q]=NRD_FrontEnd_PackNormalAndRoughness(normal,1,0);_ViewZ[q]=z;
+ float2 mv=_CameraMotionVectorsTexture.Load(int3(p,0));_Motion[q]=float4(all(isfinite(mv))?-mv:0,0,0);
+ if(_Diagnose)_TraceInfo[q]=float4(flags,work,hits,distance);
+}

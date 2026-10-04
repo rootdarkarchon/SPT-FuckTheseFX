@@ -1,0 +1,19 @@
+#pragma kernel Probe
+#include "../XeGTAO/ContactGI.compute"
+int _ProbeMode,_ProbeFrame;
+RWTexture2D<float4> _Probe;
+[numthreads(8,8,1)]void Probe(uint2 p:SV_DispatchThreadID) {
+ uint w,h;_Probe.GetDimensions(w,h);if(p.x>=w||p.y>=h)return;
+ float2 s=GISample(int2(p),_ProbeFrame);
+ if(_ProbeMode==0){float3 d=GICosine(s,float3(0,0,1));_Probe[p]=float4(d,dot(d,d));return;}
+ if(_ProbeMode==1){_Probe[p]=float4(s,0,1);return;}
+ if(_ProbeMode==7){float3 original=float3(1.2,.05,.3),addition=float3(.02,.1,.4);_Probe[p]=float4(GIEncode(GIDecode(original)+addition)-original,0);return;}
+ float3 c=float3(.3,.2,.1);
+ if(_ProbeMode==3)c=0;
+ if(_ProbeMode==4)c=s.x<.5?float3(0,0,.8*.2126/.0722):float3(.8,0,0);
+ if(_ProbeMode==5)c*=2;
+ _Radiance[p]=REBLUR_FrontEnd_PackRadianceAndNormHitDist(c,REBLUR_FrontEnd_GetNormHitDist(.3,10,float3(.75,0,1),1),true);
+ _Normal[p]=NRD_FrontEnd_PackNormalAndRoughness(float3(0,0,-1),1,0);
+ _ViewZ[p]=10;_Motion[p]=0;
+ _Probe[p]=float4(c,.3);
+}

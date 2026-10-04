@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace FuckTheseFX.Source.Occlusion
 {
-    public enum OcclusionView { Normal, Depth, BeforeBlur, AfterBlur, CombinedAO = 6, SecondPassAO = 7, BentNormals = 8, BentSHDifference = 9, BentLightingDifference = 10, AmbientDirectional = 11, AmbientUpward = 12, AmbientFill = 13, AmbientInteriorTransmission = 14, AmbientShares = 15, ScreenSpaceContactGI = 16, ScreenSpaceContactGIHistory = 17, FoliageLightingCapture = 18, FoliageLive = 19 }
+    public enum OcclusionView { Normal, Depth, BeforeBlur, AfterBlur, CombinedAO = 6, SecondPassAO = 7, BentNormals = 8, BentSHDifference = 9, BentLightingDifference = 10, AmbientDirectional = 11, AmbientUpward = 12, AmbientFill = 13, AmbientInteriorTransmission = 14, AmbientShares = 15, ScreenSpaceContactGI = 16, ScreenSpaceContactGIHistory = 17, FoliageLightingCapture = 18, FoliageLive = 19, ScreenSpaceContactGIRaw = 20, ScreenSpaceContactGIDenoised = 21, ScreenSpaceContactGIHitDistance = 22, ScreenSpaceContactGITrace = 23 }
     public enum FoliageLivePreview { Scene, BeforeAmbient, AfterAmbient, BeforeOpaque, AfterOpaque, AfterTransparency, AmbientDifference, OpaqueDifference, ExperimentalMask }
 
     // Configuration owns policy; neither the GPU pipeline nor the camera owns saved preferences.

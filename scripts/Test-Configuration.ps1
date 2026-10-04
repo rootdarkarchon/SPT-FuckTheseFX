@@ -18,7 +18,7 @@ $null = $bind.Invoke($null, $bindArgs)
 $catalog = $plugin.GetField('Settings', $flags).GetValue($null)
 $entries = @($catalog.GetType().GetProperty('Settings', $flags).GetValue($catalog))
 $expected = Get-Content (Join-Path $PSScriptRoot 'ConfigurationExpectations.json') -Raw | ConvertFrom-Json
-if ($config.Count -ne 95 -or $entries.Count -ne 94 -or $expected.Count -ne 94) { throw 'Expected 94 real settings plus one UI row' }
+if ($config.Count -ne 99 -or $entries.Count -ne 98 -or $expected.Count -ne 98) { throw 'Expected 98 real settings plus one UI row' }
 function Entry($section, $key) { $config[[BepInEx.Configuration.ConfigDefinition]::new($section, $key)] }
 function Tag($entry, $name) { $entry.Description.Tags[0].GetType().GetField($name).GetValue($entry.Description.Tags[0]) }
 foreach ($spec in $expected) {
@@ -52,7 +52,7 @@ function TestManagerGroupOrder($boundConfig) {
     $instance = [Runtime.Serialization.FormatterServices]::GetUninitializedObject($managerType)
     $allField = $managerType.GetField('_allSettings', $flags)
     $all = [Activator]::CreateInstance($allField.FieldType)
-    $info = [BepInEx.BepInPlugin]::new('com.rootdarkarchon.fuckthesefx', 'Fuck These FX', '1.7.0')
+    $info = [BepInEx.BepInPlugin]::new('com.rootdarkarchon.fuckthesefx', 'Fuck These FX', '1.8.5')
     foreach ($pair in $boundConfig) {
         $setting = [Activator]::CreateInstance($managerEntryType, $flags, $null, [object[]]@($pair.Value, $null), $null)
         $managerEntryType.GetProperty('PluginInfo', $flags).SetValue($setting, $info)
@@ -135,13 +135,16 @@ $highQuality=$vanillaPlus.Clone()
 foreach ($key in @('Additional Ambient Highlight','Sharpen Filter','Vintage Filter')) { $highQuality["1. Vanilla Optimizations/$key"]=$false }
 $highQuality['2. XeGTAO/Enabled']=$true
 $highQuality['4. Stochastic GGX SSR/Enabled']=$true
-$presets=@{ Vanilla=$vanilla; VanillaPlus=$vanillaPlus; HighQualityVisuals=$highQuality }
+$highQualityPlus=$highQuality.Clone()
+$highQualityPlus['3. Screen Space Contact Global Illumination/Enabled']=$true
+$presets=@{ Vanilla=$vanilla; VanillaPlus=$vanillaPlus; HighQualityVisuals=$highQuality; HighQualityPlusVisuals=$highQualityPlus }
 $helpText=$catalog.GetType().GetField('PresetHelpText',$flags).GetRawConstantValue()
-if ($helpText -ne 'Hold Shift while pressing on a preset button to restore full defaults. FTFX provides more settings than shown when enabling "Advanced Settings", the current advanced settings, presets and defaults are tuned and authored for visuals and performance.') { throw 'Wrong visible preset help text' }
+if ($helpText -ne 'Hold Shift while pressing on a preset button to restore full defaults. FTFX provides more settings than shown when enabling "Advanced Settings". The current advanced settings, presets and defaults are tuned and authored for visuals and performance.') { throw 'Wrong visible preset help text' }
 foreach ($spec in @(
     @('VanillaPresetButton','Vanilla','Disables FTFX fixes and changes, restoring Vanilla appearance. Useful for direct image and performance comparison.'),
     @('VanillaPlusPresetButton','FTFX Vanilla+ (Default)','Retains Vanilla baseline appearance and fixes minor performance issues.'),
-    @('HighQualityPresetButton','FTFX HQ Visuals','Applies targeted FTFX visuals as designed by the author.')
+    @('HighQualityPresetButton','FTFX HQ Visuals','Applies targeted FTFX visuals as designed by the author.'),
+    @('HighQualityPlusPresetButton','FTFX HQ+ Visuals','FTFX HQ Visuals, but with all effects enabled.')
 )) {
     $content=$catalog.GetType().GetField($spec[0],$flags).GetValue($null)
     if ($content.text -ne $spec[1] -or $content.tooltip -ne $spec[2]) { throw "Wrong preset label/tooltip: $($spec[0])" }
@@ -150,7 +153,7 @@ foreach ($savePolicy in @($false,$true)) {
     $config.SaveOnConfigSet=$savePolicy
     foreach ($restoreDefaults in @($false,$true)) {
     SetNonDefaultValues
-    foreach ($presetName in @('VanillaPlus','HighQualityVisuals','HighQualityVisuals','Vanilla','Vanilla','VanillaPlus','VanillaPlus')) {
+    foreach ($presetName in @('VanillaPlus','HighQualityVisuals','HighQualityPlusVisuals','HighQualityPlusVisuals','HighQualityVisuals','HighQualityPlusVisuals','Vanilla','Vanilla','VanillaPlus','VanillaPlus')) {
         $before=@{}
         foreach ($entry in $entries) { $before["$($entry.Definition.Section)/$($entry.Definition.Key)"]=$entry.BoxedValue }
         $preset=[Enum]::Parse($presetType,$presetName)
@@ -170,5 +173,5 @@ foreach ($savePolicy in @($false,$true)) {
     }
 }
 $bindArgs[0]=$config;$null=$bind.Invoke($null,$bindArgs)
-if ($config.Count -ne 95) { throw 'Repeated binding duplicated settings' }
-Write-Output 'Verified 94 settings, numerically ordered CM 18.4 groups, integer percentages, eight-frame SSR default, three preset labels/tooltips and help text, selective and Shift-reset presets, save policy and persistence.'
+if ($config.Count -ne 99) { throw 'Repeated binding duplicated settings' }
+Write-Output 'Verified 98 settings, numerically ordered CM 18.4 groups, integer percentages, eight-frame SSR default, four preset labels/tooltips and help text, selective and Shift-reset presets, save policy and persistence.'

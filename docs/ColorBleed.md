@@ -1,246 +1,91 @@
-# Screen Space Contact GI prototype
+# Screen Space Contact GI — NRD implementation
 
-Opt-in short-range diffuse color transfer, separate from existing AO tuning. Requires
-FTFX XeGTAO, D3D11, HDR deferred rendering and CameraManager.Instance.Camera.
-Both Gamma (used by the installed EFT PlayerSettings) and Linear color space are supported.
-Game AO Off bypasses it with the FTFX occlusion stack.
-CustomAmbient's fix and bent normals are not required. Existing ambient is sampled
-as rendered; its lighting and AO behavior are not changed.
+SSCGI now traces short cosine-weighted diffuse rays and passes incident radiance to the pinned NRD 4.18.0 `REBLUR_DIFFUSE` backend. It remains main-camera, HDR deferred, opaque contact bounce with a XeGTAO dependency. FTFX SSR does not need to be enabled. There is no sky/environment fallback.
 
-## Pipeline
+## In-game comparison
 
-The camera-owned command buffer is first at BeforeImageEffectsOpaque, after native
-CustomAmbient at AfterLighting, ahead of opaque fog/SSR and the actor composite.
-Registration preserves all other buffers' relative order and is checked again at
-camera pre-render. It does not use the downstream UltimateBloom hook.
+1. Replace the entire `BepInEx/plugins/FuckTheseFX` runtime folder from the ZIP, including its DLL, native DLL and asset bundles. Preserve your config. Start with XeGTAO enabled and Debug View = Normal.
+2. Enable **Screen Space Contact Global Illumination**. The authored defaults now match the tested in-game SSCGI configuration: Resolution 15%, 4 rays, 128 steps, 16 history frames, radius 1 m, depth tolerance 0.05 m, donor limit 1, Strength 6 and NRD anti-firefly on. Enabled defaults to off. Explicit saved values remain in use; no configuration migration is performed. The Resolution (%) key defaults to 15%.
+3. Compare off/on beside a coloured wall or object with a neutral receiver. Hold still, then translate and rotate slowly. Check hue, flicker, contact detail, thin barriers, moving objects and newly exposed surfaces. Compare 10%, 15%, 20%, 25% and 50% resolution, keeping rays, radius and Strength fixed. Percentages apply to each internal camera dimension: at 2560x1440, 10% = 256x144 and 25% = 640x360. Pixel count at 10% is 16% of the 25% setting; full-resolution source capture, depth hierarchy and reconstruction still retain their cost. Test anti-firefly off separately if small colour-transfer details appear suppressed.
+4. Repeat with TAA and DLSS, and with FTFX SSR off/on. Inspect foliage, water and actors. Test hideout/raid transitions, resize, graphics changes and toggling GI. Record which settings and scene produced each observation.
+5. For diagnostic inspection use the contribution, raw, denoised, hit-distance or trace views. Return to Normal and turn captures off before measuring performance.
 
-1. Capture fresh pre-tonemap scene RGB to RGBAHalf, with representative linear depth
-   in alpha. Select the nearest actual surface per 2x2 or 4x4 block; average only
-   compatible geometry, limiting donor luminance before filtering. An RGBA8 guide
-   contains octahedral geometric view normal, resolved XeGTAO visibility, and validity plus the
-   representative texel offset. Actors are rejected using the existing stencil mask;
-   if actor AO is disabled, only its inexpensive mask capture is retained.
-2. Gather 4, 6, 8, 16 or 32 nearby donors within a world-space radius. Use both endpoint
-   shading-normal facing terms, squared distance falloff and one projected 3D midpoint depth test.
-   Reject sky, off-screen and invalid donors. Divide by configured sample count,
-   including rejected samples. Write incident RGB plus a capped donor luminance
-   reference to RGBAHalf. The reference is the mean over configured sample count,
-   not an uncapped radiance estimate or a statistical median. With temporal enabled,
-   pixel/frame/tap hashes independently choose angles and jitter radii within equal-
-   area annuli. This removes the shared rotating spiral and 64-render phase reset.
-   The render counter remains an integer through shader upload, uses all 32 bits,
-   and wraps only after 2^32 renders (or resets with history). This is stratified
-   pseudorandom sampling, not a blue-noise sequence. Temporal-off restores the
-   original fixed sampling pattern. Recording commands does not advance the counter.
-3. Reproject valid receiver positions into the previous camera view. Validate four
-   history taps using depth-derived geometric world normals, tangent-plane depth,
-   distance and local source lighting changes. The geometric normal uses four full-
-   resolution depth neighbors, choosing the smaller discontinuity on each axis;
-   capture, temporal validation and spatial reconstruction use geometric normals,
-   while transport reads shading normals directly from the G-buffer. History distance
-   bounds account for the enlarged pixel footprint at grazing angles (capped at 40x).
-   Source-lighting neighborhoods, temporal taps, spatial filtering and upscaling
-   share the same angle-aware footprint and two-sided plane checks. Geometry and
-   source-lighting confidence fade near their rejection limits; surviving bilinear
-   coverage continuously reduces the history blend and effective age. The former
-   20% coverage cutoff is removed. Invalid/different surfaces still hard-reject.
-   Plane comparisons allow for half-precision depth rounding projected onto the plane;
-   capture/current-depth and midpoint-visibility tolerances remain unchanged. Compare previous
-   source lighting against a geometry-compatible 3x3 current color envelope, so
-   resampling normal maps or texture detail does not by itself discard history.
-   Uniform lighting changes outside that envelope still reject immediately.
-   Accumulate incident RGB and donor reference with a per-pixel
-   history count, capped at 16 by default (4-30 configurable), plus first and second
-   luminance moments. These use RG32F so squared dim lighting does not underflow.
-   Variance controls spatial filtering, rather than treating random donor changes
-   as evidence that otherwise valid history is wrong. History luminance and
-   reference are bounded by the configured donor ceiling, preserving hue. Current
-   random donor brightness cannot bound an accumulated mean: even a dim nonzero hit
-   must not erase previous bright hits. Empty sample neighborhoods use the selected
-   history rate too: at 16 frames, accepted history retains 15/16 of its value,
-   without a hidden 75% fallback. Persistently absent donors decay at that rate;
-   incompatible surfaces/local lighting still reject history immediately.
-   Invalid current geometry never receives history. Representative pixel offsets
-   remain aligned across frames, avoiding repeated subpixel drift on static surfaces.
-4. Smooth accumulated RGB and its donor reference together with two 3x3 binomial
-   filters at the selected resolution, with one- and two-texel spacing. Reject invalid guides, geometric normal discontinuities,
-   tangent-plane depth disagreements and distant neighbors; weight by normal and
-   AO similarity. Valid zero-light neighbors retain weight to suppress speckles.
-   Each base pass is bounded to a quarter of the world-space gather radius.
-   With temporal accumulation, a third pass at four-texel spacing adds wider
-   filtering for high relative luminance variance or young history. It uses
-   variance-scaled luminance weights and is bounded to half the gather radius.
-   Mature zero-variance pixels bypass this wider neighborhood. Maximum combined
-   reach is seven low-resolution texels per axis. The spatial result is not saved
-   into history, avoiding cumulative blur.
-5. Reconstruct with four plane/depth/normal-aware taps. Apply strength with a 32x
-   artistic radiance gain to compensate for the sparse weighted gather, then receiver
-   diffuse reflectance, maximum bounce fraction, smoothstep(0.05, 0.35, XeGTAO visibility),
-   distance and screen-edge fades. Add RGB and preserve destination alpha.
+The user approved the current NRD SSCGI implementation on 2026-10-04 following in-game visual review and on/off GPU benchmarks. The accepted configuration is 15% resolution, Strength 6 and the defaults listed below. The retired donor gather/custom-denoiser implementation and frozen comparison sources have been removed. Synthetic tests continue to check signal contracts and resource behavior; they do not substitute for in-game visual review.
 
-Defaults: quarter of each internal dimension, 8 samples, 0.75 m radius, strength 3,
-depth tolerance 0.02 m, donor luminance cap 2 HDR units, maximum bounce fraction 0.2,
-and fade from 15 to 25 m. Temporal accumulation and Spatial filter are on by default;
-toggle them under Advanced for A/B comparisons. History frames defaults to 16.
-All tuning is Advanced; only Enabled is a normal control.
-Strength ranges from 0 to 4 (100% = 1); saved strength values are retained but now
-produce a stronger effect. The maximum fraction caps the reflected addition after
-receiver reflectance and before AO/distance/edge fades. It still uses the donor
-reference averaged over all configured taps, so sparse survivors retain their
-coverage penalty. Increasing strength eventually reaches this cap. Black receivers
-and closed crevices still add zero; persistently unlit donors converge to zero.
-No brightness floor is introduced.
 
-There is no ray marching. The three base
-low-resolution targets cost 20 bytes per low-resolution pixel. Spatial filtering
-adds one low-resolution RGBAHalf target (8 bytes per pixel) and two nine-tap draws,
-plus a third adaptive draw when temporal accumulation is enabled;
-disabling it releases that target and skips the filter draws. The second pass reuses the
-finished gather target; no draw reads and writes the same texture. Geometric normals
-also add depth reads during capture and full-resolution reconstruction, while gather
-reads shading normals per endpoint. Temporal accumulation adds five RGBAHalf
-targets and two RG32F moment targets at the selected resolution (56 bytes per pixel),
-one resolve draw with three outputs, and four same-size history copies. They hold current and previous incident
-light/surface state plus previous source lighting. Surface state packs depth, world
-normal and an exactly representable history-count/representative-offset integer.
-Read and write histories never alias. Temporal-off releases all seven targets.
-Gamma rendering also
-requires one full-resolution RGBAHalf scene snapshot (8 bytes per full-resolution
-pixel), taken before adding the effect. Capture decodes donor RGB into linear light;
-composition decodes receiver albedo and computes encode(decode(original) + bounce)
-minus original, then adds that encoded increment. This preserves the original scene
-and its alpha without adding gamma-encoded light directly. The Linear path does not
-allocate or copy this full-resolution target. GPU marker: FTFX Bleed gamma snapshot.
-XeGTAO's existing full-resolution linear depth and visibility are reused. Its weighted
-depth mips are not conservative visibility bounds and are not used for segment tests.
-Normal maps still affect transport, but no longer define temporal or filtering
-surface normals when valid depth derivatives are available.
+## Controls and cap semantics
 
-## Limits and evaluation
+Controls include Enabled, Strength, Temporal accumulation, History frames, Radius, Depth tolerance, Donor luminance limit, Maximum bounce fraction (%) and Distance cutoff. Advanced sampling controls are Rays per pixel (1/2/4), Maximum ray steps (16–128) and NRD anti-firefly. Resolution is now an integer **Resolution (%)** control, default 15 and range 10-50. No configuration migration is performed. Dimensions round up, including odd sizes, and changes recreate NRD resources and reset history. Strength ranges from 0-10. Fresh defaults are disabled, 15% resolution, 16 history frames (4-63), 4 rays, 128 steps, radius 1 m, depth tolerance 0.05 m, donor limit 1, distance cutoff 25 m and Strength 6.
 
-This is a bounded scene-color approximation, not diffuse-only or energy-conserving GI.
-Specular donor suppression and the luminance cap reduce outliers; they cannot identify
-all emission. Existing ambient can double-count some indirect light. One midpoint
-cannot prevent every thin-wall leak or recover hidden/off-screen geometry. Quarter
-resolution can lose small donors, particularly with low DLSS input resolutions.
-Temporal reprojection uses camera matrices, not object motion vectors. Moving props,
-coplanar movers and fast lighting changes can still leave short trails. The texture
-envelope can also retain history near moving lighting boundaries. Local lighting
-rejection and the configured ceiling reduce those errors but cannot identify every
-donor change. Surface detail and strict rejection can still expose noise. Hidden or
-off-screen donors and genuinely invalid surfaces cannot be recovered by accumulation.
+The final added luminance ceiling is now **Donor luminance limit × Maximum bounce fraction**. It is applied with hue-preserving scaling after receiver reflectance and Strength, before visibility and fades. It adds no brightness floor and no noisy local donor reference. Donor luminance limit is a ceiling, not a multiplier: raising it beyond the available donor luminance has no effect unless the final bounce cap is also active. Limits above 1 are supported and verified with actual traced HDR donors.
 
-Capture requires matching color/G-buffer/depth dimensions and rejects current-depth
-disagreements with deferred geometry. Unsupported camera modes are bypassed with a
-warning. Allocation/shader failures disable only this feature until toggled off/on.
-Targets are released on disable, camera change/disposal, or other AO diagnostics; resize
-reallocates them. The source is overwritten before every gather, preventing recursive
-feedback. History is promoted only after an actual camera render and contains no
-final composited color, albedo, strength or AO. Other cameras never publish or
-consume these targets. History resets on resolution changes, Screen Space Contact GI tuning,
-color-space/target changes, camera cuts, large FOV changes, and gaps over 0.5 seconds.
-Camera cuts include translations over max(1 m, 2*radius) or orientation changes over
-30 degrees. Debug gain changes and switching between Normal, ScreenSpaceContactGI and ScreenSpaceContactGIHistory views
-do not reset history; other AO diagnostics still release the Screen Space Contact GI pipeline.
+**Reconstruction cutoff** is an Advanced slider from 0 to 0.1, default 0. It measures final added linear luminance after receiver reflectance, Strength, the bounce cap, AO visibility and distance/edge fades. Zero skips only exactly black GI. A conservative upper bound over all four denoised taps rejects faint receivers before their geometric reconstruction; contributions fade in smoothly from the cutoff to twice the cutoff. Contributions above twice the cutoff retain their brightness and hue. This is a composition control: it does not skip rays or alter valid black observations in NRD. Try 0, 0.001, 0.002 and 0.005 at the same view and exposure, checking subtle colour transfer and moving camera transitions.
 
-Use F12 > Fuck These FX > Screen Space Contact GI > Enabled. Compare a lit colored object beside
-a neutral surface, then shadow the donor; check dark crevices, smooth/emissive objects,
-weapons, thin partitions, screen edges and camera movement. Compare half/quarter at
-the same internal rendering resolution and 4/6/8/16/32 samples at the same radius/strength.
-GPU markers: FTFX Bleed capture, FTFX Bleed gather, FTFX Bleed temporal resolve,
-FTFX Bleed spatial filter, FTFX Bleed composite, FTFX Bleed history copy. Disable all
-diagnostics for timings. Unity fixtures establish shader contracts, not live EFT
-visual acceptance or a measured in-game performance saving.
+Temporal-off retains NRD spatial processing. Strength, reconstruction-cutoff, bounce-cap and diagnostic-gain changes preserve incident-light history. Transport, guide, AA, projection, target, colour-space and resolution changes reset it, as do camera cuts and render gaps over 0.5 seconds.
 
-The dim Gamma fixture uses a 0.075 neutral receiver beside a (0.2, 0.05, 0.02) donor,
-0.25 receiver albedo, 0.75 m radius and open visibility. At half resolution/eight taps,
-strength 1 in the unfiltered 1.3.2 pass raises mean receiver red by 0.00636 versus
-0.000209 in 1.3.1 (about 30x).
-This is a controlled shader measurement before downstream effects, not an EFT capture.
-The complete temporal + spatial Gamma fixture tests 32 varying real gathers and
-compares frame differences over the final 16. Its squared frame-difference ratio
-is about 0.009 relative to spatial filtering alone, with mean red addition 0.00628
-at half resolution. This stationary fixture does not establish in-game ghosting
-or performance. Additional GPU checks cover history rejection, decay, camera
-reprojection, 16-frame count/offset packing and camera lifecycle resets.
+## Signal and visibility contract
 
-## Contribution diagnostic
+The command buffer remains first at BeforeImageEffectsOpaque, after ambient lighting and before opaque fog/SSR. Each render captures fresh full-resolution source lighting before adding GI. Donors never use the previous composited scene.
 
-With Screen Space Contact GI enabled, select Advanced > Debug > View = ScreenSpaceContactGI. Screen Space Contact GI
-gain defaults to 16x (1-128x) and affects only the display. At 1x the texture contains
-the shader's added pre-tonemap scene RGB, after optional temporal/spatial filtering,
-strength, maximum bounce,
-receiver diffuse reflectance, AO visibility and distance/edge fades. In Gamma mode
-this is the encoded RGB increment actually blended into the scene; in Linear mode
-it is the linear RGB addition. It is not raw
-gathered light and does not include later fog, tonemapping or bloom responses.
+XeGTAO mip-zero linear depth supplies a separate conservative min-depth hierarchy. Each reduction uses four clamped source samples and ceil-sized levels, including odd dimensions. Averaged XeGTAO mips are not used for visibility.
 
-The debug pass calls the exact same contribution function with the same immutable
-inputs as the additive composite. Scene rendering still receives the normal addition;
-the isolated image is drawn over it through the existing GUI diagnostic path, keeping
-F12 usable. Only the current main camera supplies this view. A disabled effect shows
-black with a disabled label; unavailable capture shows cyan; mismatched input sizes
-show magenta. A valid black result means zero addition, including at strength zero.
+Receivers occupy fixed low-resolution pixel centres. All sampled guides describe that UV. A fixed licensed 128×128 blue-noise texture scrambles a 32-point two-dimensional Sobol sequence; a single global shift changes between cycles. The sequence advances on actual camera renders. It does not use per-frame pixel hashes or a shared rotating spiral.
 
-This mode adds one full-resolution RGBAHalf target and one draw, released on return
-to Normal. It adds no diagnostic target/draw during normal rendering. The capture
-keeps HDR values; amplified highlights may clip on the display. Use Normal to judge
-the final scene and measure performance. GPU tests compare every debug pixel against
-the normal additive result at 1x/16x and verify display gain cannot change scene RGB.
+Rays reject below-geometric-surface directions and traverse conservative cells with bounded work, full-depth crossing refinement and self-hit rejection. The first blocking surface terminates transport. Actors provide blocking geometry but cannot donate light. Gamma donors are decoded to linear light; donor luminance is limited without desaturation, glossy donors are suppressed and squared world-distance falloff bounds transport.
 
-## History diagnostic
+Radiance is averaged over every launched ray, including zero misses. Cosine sampling cancels the receiver cosine/PDF factor. Receiver-to-hit distance is measured separately from brightness: finite accepted endpoints, including black surfaces and actors, contribute to its arithmetic mean. No endpoint means zero distance.
 
-Advanced > Debug > View = ScreenSpaceContactGIHistory displays the temporal resolve's actual
-retention and limiting, independently of contribution display gain. Green means
-retained history (mixed with red according to the current/history blend). Rejection
-reasons are red for depth/position, yellow for geometric normal, cyan for local
-lighting, and orange for fresh/offscreen/unavailable history. Blue means invalid
-current geometry; magenta indicates strong history limiting. Rejection colors report
-the stage that removed enough bilinear weight to prevent accumulation.
-The configured frame count is only an upper limit;
-the diagnostic shows what the shader actually retained this render.
+Compute directly writes packed RGBA16F YCoCg radiance/normalized hit distance, upstream-packed RGB10 normals with diffuse roughness 1, R32F view depth and RGBA16F previous-minus-current UV motion. Invalid receivers use out-of-range view depth; valid zero-light receivers remain eligible. The bridge uses one diffuse identifier and no duplicate SSR packing or coverage denoiser. Normalization is A=Radius, B=0, C=1 in both shader and native settings. Checkerboarding and hit-distance reconstruction are off. Initial prepass/min/max blur radii are 8/1/16, with anti-firefly enabled and other upstream defaults. Main/stabilized history follow the configured limit; fast history is capped at 6, history-fix at 3.
 
-This view requires Temporal accumulation. It adds one low-resolution RGBA8 target
-(4 bytes per pixel), written as a fourth output of the existing temporal draw. There
-is no additional draw; the target is released outside this view. History remains
-active when switching between the contribution and history diagnostics.
+The pinned signal specification is [NRD noisy inputs](https://github.com/NVIDIA-RTX/NRD/blob/c3d8999f8b30dca3b1c07d9aeab235b29d9b1a28/README.md#noisy-inputs). Existing SSR exports, 292-byte frame layout and settings remain compatible. The diffuse frame uses its own version-checked 304-byte ABI. Packets retain native COM textures/backend ownership; cancellation and disposal require no synchronous GPU waits.
 
-The sparse-color regression checks mature 16-frame history against a different-hue
-sample and a zero-hit sample. Both retain the expected 93.75% history. It also checks
-alternating donor colors converge to their mixture, rather than clipping old hues
-to the latest sample. These checks do not establish live-game stability.
+Depth-plane/geometric-normal-aware reconstruction applies full-resolution receiver reflectance, Strength, cap, AO visibility and distance/edge fades. Actors and exactly zero-contribution receivers are rejected before reconstruction. Gamma composition is exactly `encode(decode(original) + addition) − original`; RGB-only blending preserves destination alpha. Native initialization or dispatch failure suppresses SSCGI, warns once and permits retry by toggling GI.
 
-Stationary front-facing and grazing-plane fixtures vary normal detail or texture
-samples independently of geometry, and require retained history plus converged
-donor colors at half and quarter resolution. Separate checks reject an actual plane
-rotation with unchanged shading normals, a uniform lighting change, and lighting
-envelopes spanning a foreground depth boundary. No extra targets or draws are added
-for this validation change; the temporal shader performs additional depth/source reads.
+## Diagnostics, capture and replay
 
-A varying-brightness fixture alternates a bright donor sample with seven dim samples.
-At 16-frame history its expected final value is 0.020660. The old per-frame reference
-clamp reduced it to 0.001634; the stable ceiling produces 0.020508 in RGBAHalf without
-limiting valid samples. Real deferred-camera checks also exercise subpixel projection
-jitter over a grazing floor near world position (-200, 2.4, -212). These fixtures do
-not reproduce or establish the cause of every correlated rejection seen in EFT.
+Numeric view IDs 16/17 remain contribution/NRD validation. ID 17 now displays the actual upstream validation panels (normal, depth, motion, history weight and hit distance). IDs 20–23 are raw radiance, denoised radiance, normalized hit distance and trace classification. Raw/denoised views contain incident linear light before material multiplication. Hit-distance grayscale is measured distance divided by Radius, with black for unavailable endpoints.
 
-The sampling probe runs the same HLSL helper as the gather. For 4/6/8/16/32 taps it checks
-disk area/directional coverage, deterministic replay, frame 64 versus frame 0,
-large integer frame indices, and fixed temporal-off output. Neighboring pixels'
-angular-motion correlation is about 0.003 in this fixture. Camera tests also cross
-frame 64 and signed integer rollover. Hashing adds integer arithmetic but no textures,
-targets, passes, or donor taps. Removing coherent motion does not eliminate random
-variance, repair history rejection, or establish live EFT stability/performance.
+Trace flags can overlap: bit 1 geometry, 2 range termination, 4 off-screen, 8 rejected self-hit, 16 budget/unsupported crossing and 32 below-geometric surface. Display combines green geometry/range, red self/budget and blue screen/below-surface. Captured trace channels are flags, traversal work, accepted endpoint count and mean distance in metres.
 
-Angle/precision regression: at 1025x577, a jittered shallow plane near world position
-(-200, 0.5, -212) lost history on 20.2% of valid samples at half resolution before
-the grazing-footprint and rounding fixes, versus 0.2% after. Rotating it to a vertical
-plane also yields 0.2%; a front-facing wall around 23 m yields 0.3%. All use the default
-0.02 m tolerance. A separate check still rejects a 10 cm depth discontinuity at 20 m.
-With shared geometry confidence, the sparse-input variance ratio is 0.024 after
-two stages and 0.008 with the adaptive third stage, versus 0.118 for one stage.
-The stable-history bypass and depth/normal/invalid/AO barriers pass GPU checks.
-Coverage just above/below the old 20% cutoff now retains 0.1692/0.1508 of a unit
-history sample instead of resetting below the cutoff. Dim moment precision,
-moment reset and varying-donor variance are also checked. These controlled results
-are not measurements of DLSS integration, in-game noise reduction, or GPU cost.
+Enable **Debug / Contact GI capture sequence** for an asynchronous sequence (8–600 frames, default 64). It automatically turns off after the requested actual renders. Resources are allocated only on request. Captures live under `BepInEx/FuckTheseFX/ContactGI/<session>/<frame>`. Diagnostic snapshots retain ownership until readback completion, including during production resize/disposal. No runtime GPU wait is introduced.
+
+Files contain row-major little-endian RGBA32F pixels. `frame.json` schema 2 records full/internal dimensions, resolution percentage, settings, AA mode, current/previous camera matrices, jitter, rendered sampling index, reset state, delta time and production/native pool memory. Raster rows are row-major; standalone Matrix4x4 arrays use Unity's column-major indexing. Source, composited scene, full depth, full material/normal/motion guides, actors/AO, packed NRD inputs, the cached geometric-normal guide, raw/denoised output and traversal work are included. Metadata also records reconstruction cutoff. `readback.txt` is written only after all data writes finish. Cancelled or failed frames cannot be accepted for temporal replay.
+
+Stage the Unity harness with `scripts/Test-Occlusion.ps1`, then replay a capture with `scripts/Replay-ContactGI.ps1 -CaptureFolder <session>`. Replay executes the actual native diffuse denoiser on captured inputs and reports packed RGB output error. Schema-1 divisor-based captures remain readable; new captures store actual receiver dimensions. Captures starting with existing history need warm-up before parity assessment. Capture allocation/readback work is excluded from performance comparisons.
+
+## Validation and performance boundaries
+
+Production uses the NRD diffuse backend and contains no custom moments, temporal resolve, spatial-filter passes or history copies. Validation stages only the current implementation.
+
+`Test-Occlusion.ps1` exercises actual native diffuse dispatches, constant/black/bright/colour signals, finite HDR, normalized distance independent of brightness, cosine sampling, cancellation, fresh source/no feedback, alpha, 10–50% odd dimensions, camera/transport resets, Strength/gain/cutoff history retention, spatial-only NRD, optional diagnostics and capture. Existing AO/decal/foliage/actor regressions remain in that suite. A 4096-sample reference and stationary NRD measurements are recorded as diagnostics. Their synthetic metrics and eight-render lighting-step measurement are not visual acceptance gates.
+
+GPU markers separately expose `FTFX GI SourceCapture`, `Hierarchy`, `TraceInputs`, `NRD`, `Reconstruction` and `Total`. Texture memory is recorded separately for production targets and native permanent/transient pools; traversal work is captured per receiver. GPU marker totals are inclusive: do not add Total to its children or turn CPU queue/event statistics into GPU timings.
+
+For future performance changes compare at matched resolution, radius and visible contribution, with repeated warm-up/measured runs and median/tail GPU cost plus hitches reported separately. Cover TAA/DLSS and SSR off/on as applicable. Visual comparisons should retain colour transfer, switched-light response, motion/disocclusion and barrier separation.
+
+## Performance changes in 1.8.3
+
+The accepted lighting configuration remains 15% resolution, Strength 6, 4 rays, 128 maximum steps, 16 history frames, radius 1 m, tolerance 0.05 m, donor limit 1, bounce cap 20%, distance cutoff 25 m and anti-firefly on. Enabled still defaults to off. Reconstruction cutoff is new and defaults to zero. NRD radii, history, anti-firefly and sampling remain unchanged.
+
+The implemented changes are listed below. The original benchmark captures remain under `D:\Tarkov-SPT-4.1\BepInEx\CustomAmbientResearch`; they do not depend on retired source copies.
+
+| Change | Expected work reduction | Preservation / cost |
+|---|---|---|
+| Conservative denoised-tap cutoff before receiver geometry | Skips geometric reconstruction where the maximum possible final addition is zero or below the selected cutoff. | All four interpolation taps contribute to the bound. Zero preserves the accepted signal; positive values intentionally remove faint colour transfer. Rays and NRD history are unchanged. |
+| Separate low-resolution geometric-normal cache | Removes four neighbour geometric-normal calculations per eligible full-resolution reconstruction. | NRD shading normals remain intact. A separate preparation dispatch uses the packed NRD shading guide as its fallback in RGBA32F, avoiding reduced precision. It adds 1,327,104 bytes (1.27 MiB) at 15% of 2560x1440. |
+| Cached native texture pointers and D3D11 views | Avoids repeated native-pointer retrieval and seven view creations per ordinary queued render. | New resource generations, resize/recovery and optional validation changes invalidate caches. Packets retain their own COM views/backend ownership. SSR exports, frame layout and settings are unchanged. This primarily targets CPU/driver overhead. |
+| Three hierarchy levels per dispatch | Reduces the 2560x1440 chain from twelve dispatches to four. | Every level retains conservative four-child minima, ceil sizes and clamped odd edges. Group-local barriers avoid cross-group dependencies. Sharing with SSR remains deferred. |
+| Projected ray origin/direction calculated once per ray | Removes repeated source-level boundary projection calculations during traversal. | Advancement, refinement, tolerance and hit-distance aggregation remain unchanged. Compiler optimization may already remove part of this work; no GPU-time claim is made. |
+| Removed eligibility group reduction | Removes two barriers and an atomic count from each trace group. | Invalid receivers still initialize packed inputs/out-of-range depth and return before launching rays. Wholly ineligible groups launch no rays. There is no adaptive ray skipping. |
+
+At 2560x1440 the full-resolution source capture still allocates 29,491,200 bytes; the min-depth chain still contains 1,228,844 pixels (4,915,376 bytes). With the geometric guide the six low-resolution production input/output targets total 3,981,312 bytes at 15%, or 11,059,200 at 25%. Native NRD pools, diagnostics and AO resources are excluded. These are logical allocation/work counts, not physical memory traffic or timings.
+
+Correctness checks compare every fused hierarchy level to independent CPU minima at 1x7, 2x1, 7x9, 259x147 and 2560x1440. Current reconstruction is checked against the actual production diagnostic output. Cutoff checks cover zero, monotonic faint-light suppression, unchanged bright contributions, destination alpha and preserved history. Gamma composition is checked against independent CPU decode/add/encode calculations. Native checks verify pointer/view reuse and invalidation; the shared DLL also passes the existing SSR suite. These checks do not judge in-game visual quality.
+
+## Measured in-game GPU cost
+
+The same-launch on/off pair at `20261004-123131-730-scene-gpu-customs-1200-vanilla` (on) and `20261004-123629-522-scene-gpu-customs-1200-vanilla` (off) uses 2560x1440 internal rendering and nearly identical views. Added coarse camera GPU mean is **0.315 ms** (6.441 on minus 6.126 off); the median difference is **0.300 ms**. Direct SSCGI mean is **0.330 ms**, median 0.328 ms and p95 0.347 ms. The on capture's 154 ms wall hitch was dominated by 147 ms of profiler preparation and is reported separately.
+
+The earlier `20261004-111125-329-scene-gpu-customs-1200-ssgi-on` / `20261004-111222-607-scene-gpu-customs-1200-ssgi-off` pair added **0.467 ms** coarse camera GPU mean. Added cost is therefore **32.6% lower across the tested builds/settings**, supported by a 31.5% direct-scope reduction (0.481 to 0.330 ms). The intervening 1.8.2 baseline at `20261004-115751-889-scene-gpu-customs-1200-vanilla` had 0.391 ms direct SSCGI mean; the optimization-only comparison measured 15.7% lower direct cost, with approximate view alignment. These are sequential scene measurements, not universal FPS claims.
+
+When evaluating positive reconstruction cutoffs, compare 0, 0.001, 0.002 and 0.005 at the same view and settings, with Debug View Normal and captures off. Record coarse camera totals and direct SSCGI separately; do not add inclusive parent scopes to their children. Detailed GI child timings are currently absent from the research CSVs, although the product records separate Unity stage markers.

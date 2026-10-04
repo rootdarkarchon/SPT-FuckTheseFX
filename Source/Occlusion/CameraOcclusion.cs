@@ -69,7 +69,7 @@ namespace FuckTheseFX.Source.Occlusion
         {
             Active = false; LightingDebugTexture = null; LastQuality = quality;
             capture.Clear(); calculate.Clear(); actors.Clear();
-            bool bleedView = settings.View.Value == OcclusionView.ScreenSpaceContactGI || settings.View.Value == OcclusionView.ScreenSpaceContactGIHistory;
+            bool bleedView = settings.View.Value == OcclusionView.ScreenSpaceContactGI || settings.View.Value == OcclusionView.ScreenSpaceContactGIHistory || (int)settings.View.Value >= 20;
             bool useLive = settings.FoliageLive && mainCamera && camera.allowHDR && ambientAvailable && settings.Ambient.Value && settings.AmbientStrengthFraction > 0;
             bool useFoliage = mainCamera && camera.allowHDR && settings.FoliageExtraAOFraction > 0 &&
                 (settings.View.Value == OcclusionView.Normal || settings.FoliageCapture || useLive);
@@ -247,7 +247,7 @@ namespace FuckTheseFX.Source.Occlusion
                 try
                 {
                     if (bleed == null) bleed = new ColorBleedPipeline(camera,assets);
-                    bleed.Record(settings.Bleed,primary.Depth,resolved,actorMask,settings.View.Value == OcclusionView.ScreenSpaceContactGI,settings.ColorBleedGain.Value,settings.View.Value == OcclusionView.ScreenSpaceContactGIHistory);
+                    bleed.Record(settings.Bleed,primary.Depth,resolved,actorMask,settings.View.Value == OcclusionView.ScreenSpaceContactGI,settings.ColorBleedGain.Value,settings.View.Value == OcclusionView.ScreenSpaceContactGIHistory,settings.View.Value);
                 }
                 catch (Exception error)
                 {

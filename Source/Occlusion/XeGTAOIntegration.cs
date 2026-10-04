@@ -154,7 +154,7 @@ namespace FuckTheseFX.Source.Occlusion
                     GUI.Box(new Rect(15,15,1050,60),"Foliage lighting capture: hold the camera still. Saves automatically, then returns to Normal.\n"+(captureStatus ?? "Waiting for the main camera. A brief pause while saving is expected."));
                 return;
             }
-            if (Event.current.type == EventType.Repaint && (settings.View.Value == OcclusionView.ScreenSpaceContactGI || settings.View.Value == OcclusionView.ScreenSpaceContactGIHistory))
+            if (Event.current.type == EventType.Repaint && (settings.View.Value == OcclusionView.ScreenSpaceContactGI || settings.View.Value == OcclusionView.ScreenSpaceContactGIHistory || (int)settings.View.Value>=20))
             { DrawColorBleedDiagnostic(); return; }
             if(Event.current.type != EventType.Repaint || !settings.Enabled.Value || settings.View.Value == OcclusionView.Normal || diagnostic == null) return;
             int old = GUI.depth; GUI.depth = 1000;
@@ -240,8 +240,8 @@ namespace FuckTheseFX.Source.Occlusion
             RenderTexture texture = null;
             bool historyView = settings.View.Value == OcclusionView.ScreenSpaceContactGIHistory;
             string status;
-            bool disabled = !settings.Bleed.Enabled.Value || (historyView && !settings.Bleed.Temporal.Value);
-            if (disabled) status = historyView ? "History unavailable: enable Screen Space Contact GI and Temporal accumulation." : "Screen Space Contact GI disabled: zero contribution.";
+            bool disabled = !settings.Bleed.Enabled.Value;
+            if (disabled) status = historyView ? "NRD validation unavailable: enable Screen Space Contact GI." : "Screen Space Contact GI disabled: zero contribution.";
             else if (!settings.Enabled.Value) status = "Unavailable: XeGTAO is disabled.";
             else
             {
@@ -255,7 +255,11 @@ namespace FuckTheseFX.Source.Occlusion
                     {
                         texture = historyView ? binding.Effect.ColorBleedHistoryTexture : binding.Effect.ColorBleedDebugTexture;
                         if (texture != null)
-                            status = historyView ? "Green: retained. Red: depth/position. Yellow: normal. Cyan: lighting. Orange: fresh/offscreen. Blue: invalid. Magenta: limited." : "Black: zero added light. RGB: added color. Magenta: mismatched inputs. Higher display gain can clip highlights.";
+                            status = historyView ? "Upstream NRD validation panels: normals, depth, motion, history and hit distance." :
+                                settings.View.Value==OcclusionView.ScreenSpaceContactGIHitDistance ? "Measured receiver-to-hit distance divided by Radius. Black: no finite endpoint; includes unlit hits." :
+                                settings.View.Value==OcclusionView.ScreenSpaceContactGITrace ? "Additive flags: green geometry/range, red self-hit/budget, blue off-screen/below-surface. Flags can overlap." :
+                                (int)settings.View.Value>=20 ? "Incident linear radiance before receiver reflectance, Strength, cap and visibility. Gain affects display only." :
+                                "Black: zero added light. RGB: added color. Higher display gain can clip highlights.";
                     }
                     break;
                 }
@@ -267,8 +271,8 @@ namespace FuckTheseFX.Source.Occlusion
                 GUI.color = texture != null ? Color.white : disabled ? Color.black : Color.cyan;
                 GUI.DrawTexture(new Rect(0,0,Screen.width,Screen.height),texture != null ? (Texture)texture : Texture2D.whiteTexture,ScaleMode.StretchToFill,false);
                 GUI.color = Color.white;
-                GUI.Box(new Rect(15,15,1100,75),(historyView ? "Screen Space Contact GI history | configured maximum "+settings.Bleed.HistoryFrames.Value+" frames" : "Screen Space Contact GI addition | display gain "+settings.ColorBleedGain.Value.ToString("0.#")+"x")+"\n"+status+
-                    (historyView ? "\nShows actual retention and limiting this render. Display gain does not apply. Select Normal before benchmarking." : "\nAfter strength, limits, albedo, visibility and fades; before fog/tonemap. Gain changes only this display. Select Normal before benchmarking."));
+                GUI.Box(new Rect(15,15,1100,75),(historyView ? "Screen Space Contact GI NRD validation | maximum "+settings.Bleed.HistoryFrames.Value+" frames" : settings.View.Value+" | display gain "+settings.ColorBleedGain.Value.ToString("0.#")+"x")+"\n"+status+
+                    (historyView ? "\nUpstream REBLUR_DIFFUSE validation; not custom rejection colours. Display gain does not apply. Select Normal before benchmarking." : "\nDiagnostic work is excluded from timings. Select Normal before benchmarking."));
             }
             finally { GUI.depth = oldDepth; GUI.color = oldColor; }
         }
