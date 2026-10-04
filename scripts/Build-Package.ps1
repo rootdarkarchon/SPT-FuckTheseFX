@@ -26,9 +26,9 @@ function Get-WorkingTreeHash([string]$RepositoryRoot) {
     } finally { $sha256.Dispose() }
 }
 $workingTreeHash = Get-WorkingTreeHash $repo
-# Explicit user-requested full-Git-HEAD testing package identity. Retain dirty-source integrity checks.
+# Preserve Git provenance separately from the required working-tree package identity.
 $gitHead = (& git -C $repo rev-parse HEAD).Trim()
-if ($gitHead -notmatch '^[0-9a-f]{40}$') { throw 'Cannot resolve full Git HEAD for the requested package name' }
+if ($gitHead -notmatch '^[0-9a-f]{40}$') { throw 'Cannot resolve Git provenance for the package receipt' }
 $assets = @('distantshadows','occlusion','stochasticssr','water')
 & dotnet build (Join-Path $repo 'FuckTheseFX.csproj') -c Release "-p:SptInstallPath=$SptInstallPath" --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
@@ -103,7 +103,7 @@ foreach ($entry in $expected.Keys) {
     if ($entry -notin $allowedEntries) { throw "Non-runtime file prohibited in FTFX package: $entry" }
 }
 if ((Get-WorkingTreeHash $repo) -ne $workingTreeHash) { throw 'Working tree changed during build; rebuild before packaging' }
-$zip = Join-Path $repo "bin\Release\FuckTheseFX-$version-SPT4.1-$gitHead.zip"
+$zip = Join-Path $repo "bin\Release\FuckTheseFX-$version-SPT4.1-$workingTreeHash.zip"
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 # FileMode.Create replaces this exact generated artifact without touching other files.
 $file = [IO.File]::Open($zip, [IO.FileMode]::Create)
@@ -125,6 +125,7 @@ try {
     }
     Write-Output "Verified all $($archive.Entries.Count) package entries and hashes."
 } finally { $archive.Dispose() }
+if ((Get-WorkingTreeHash $repo) -ne $workingTreeHash) { throw 'Working tree changed during ZIP creation; rebuild before packaging' }
 Get-FileHash -LiteralPath $zip -Algorithm SHA256
 
 
