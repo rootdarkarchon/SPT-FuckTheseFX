@@ -7,6 +7,7 @@ Copy-Item (Join-Path $repo 'Source/StochasticSSR/*.cs') (Join-Path $project 'Ass
 Copy-Item (Join-Path $repo 'SettingsCatalog.cs') (Join-Path $project 'Assets/Editor') -Force
 Copy-Item (Join-Path $repo 'ConfigurationManagerAttributes.cs') (Join-Path $project 'Assets/Editor') -Force
 Copy-Item (Join-Path $repo 'unity/StochasticSsrValidation/NrdStandardValidation.cs') (Join-Path $project 'Assets/Editor') -Force
+Copy-Item (Join-Path $repo 'unity/StochasticSsrValidation/CloudProbeAudit.shader') (Join-Path $project 'Assets') -Force
 foreach($source in Get-ChildItem (Join-Path $repo 'unity/StochasticSsrValidation/Baseline/BeforeNrdStandard/Source') -Filter '*.cs') {
     $text=(Get-Content -LiteralPath $source.FullName -Raw).Replace('namespace FuckTheseFX.Source.StochasticSSR','namespace FuckTheseFX.Source.StochasticSSR.PreNrdStandard')
     [IO.File]::WriteAllText((Join-Path $project ('Assets/Editor/Before-'+$source.Name)),$text)

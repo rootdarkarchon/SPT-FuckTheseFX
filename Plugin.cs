@@ -19,7 +19,7 @@ namespace FuckTheseFX
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Guid = "com.rootdarkarchon.fuckthesefx";
-        public const string Version = "1.8.5";
+        public const string Version = "1.8.6";
         internal static ManualLogSource MyLog;
         internal static ConfigEntry<bool> AmbientHighlightEnabled, DistantShadowSamplingEnabled;
         internal static ConfigEntry<bool> DistantShadowsEnabled;

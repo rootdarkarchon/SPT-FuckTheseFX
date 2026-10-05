@@ -14,6 +14,14 @@ using FuckTheseFX.Source.StochasticSSR;
 using Before=FuckTheseFX.Source.StochasticSSR.PreNrdStandard;
 namespace EFT.CameraControl { public class CameraManager { public static CameraManager Instance; public Camera Camera; } }
 namespace FuckTheseFX { internal static class Plugin { internal const string Guid="com.rootdarkarchon.fuckthesefx"; internal static BepInEx.Logging.ManualLogSource MyLog=new BepInEx.Logging.ManualLogSource("SSR validation"); } }
+// Optional-provider ABI fixture: production discovers these entries by full type name.
+namespace CloudSix.Source {
+    internal enum FixtureTemporalMode { Off,Blend,Nubis,SkyDome }
+    internal static class CloudConfig {
+        public static ConfigEntry<bool> CustomSky,PublishSkyReflections;
+        public static ConfigEntry<FixtureTemporalMode> TemporalMode;
+    }
+}
 public static class NrdStandardValidation {
     private static readonly List<string> checks=new List<string>();
     private static readonly List<UnityEngine.Object> owned=new List<UnityEngine.Object>();
@@ -52,7 +60,7 @@ public static class NrdStandardValidation {
             var go=new GameObject("NRD standard fixture");owned.Add(go);camera=go.AddComponent<Camera>();camera.enabled=false;camera.renderingPath=RenderingPath.DeferredShading;camera.allowHDR=true;camera.nearClipPlane=.1f;camera.farClipPlane=500;camera.fieldOfView=65;
             rendererType=AccessTools.TypeByName("UnityEngine.Rendering.PostProcessing.ScreenSpaceReflectionsRenderer");
             var factory=new PropertySheetFactory();var context=Context(factory);context.command.Dispose();factory.Release();Fixture();
-            ConfigContracts();RejectionDiagnosticsLifecycle();SyntheticParity();Lifecycle();Routing();CapturedParity();
+            ConfigContracts();RejectionDiagnosticsLifecycle();SyntheticParity();CloudSkyIntegration();CloudProbeIntegration();CapturedCloudSkyOrientation();Lifecycle();Routing();CapturedParity();
             foreach(var sh in new[]{reflection,NrdSpecularBackend.ValidationShader,blend})Check(!ShaderUtil.GetShaderMessages(sh).Any(m=>m.severity.ToString()=="Error"),"executed shader compiles: "+sh.name);
             Check(!ShaderUtil.GetComputeShaderMessages(compute).Any(m=>m.severity.ToString()=="Error"),"executed Hi-Z variants compile");
             var ssr=new AssetBundleBuild {assetBundleName="stochasticssr",assetNames=new[]{"Assets/HiZ.compute","Assets/Support.shader","Assets/Reflection.shader","Assets/WaterCapture.shader","Assets/AMD/BlueNoise.bytes"}};
@@ -203,6 +211,166 @@ public static class NrdStandardValidation {
         var baseNormals=normals.GetPixels();
         Parity("animated launch normals",128,12,Options(),frame=>{float t=.08f*Mathf.Sin(frame*.7f);normals=Texture(baseNormals.Select(v=>{var n=new Vector3(v.r*2-1+t,v.g*2-1,v.b*2-1).normalized;return new Color(n.x*.5f+.5f,n.y*.5f+.5f,n.z*.5f+.5f,1);}).ToArray());});
         normals=oldNormals;depths=oldDepth;specular=Texture(original);
+    }
+    private static void CloudSkyIntegration() {
+        var config=new ConfigFile("cloud-fixture.cfg",false);config.SaveOnConfigSet=false;
+        CloudSix.Source.CloudConfig.CustomSky=config.Bind("Sky","Custom Sky",true);
+        CloudSix.Source.CloudConfig.PublishSkyReflections=config.Bind("Sky","Publish",true);
+        CloudSix.Source.CloudConfig.TemporalMode=config.Bind("Clouds","Mode",CloudSix.Source.FixtureTemporalMode.SkyDome);
+        var provider=new SsrSkySource();
+        var map=new Texture2D(512,256,TextureFormat.RGBAFloat,false,true){filterMode=FilterMode.Bilinear,wrapModeU=TextureWrapMode.Repeat,wrapModeV=TextureWrapMode.Clamp};owned.Add(map);
+        var pixels=new Color[512*256];
+        for(int y=0;y<256;y++)for(int x=0;x<512;x++)pixels[y*512+x]=new Color(.5f+.25f*Mathf.Cos(2*Mathf.PI*(x+.5f)/512),(y+.5f)/256,.8f,1);
+        map.SetPixels(pixels);map.Apply();Shader.SetGlobalTexture("_SsrSkyReflMap",map);
+        Check(provider.Read()==map,"CloudSix global and live configuration activate sky source");
+        CloudSix.Source.CloudConfig.CustomSky.Value=false;Check(provider.Read()==null,"Custom Sky off rejects still-bound stale map");CloudSix.Source.CloudConfig.CustomSky.Value=true;
+        CloudSix.Source.CloudConfig.PublishSkyReflections.Value=false;Check(provider.Read()==null,"publish off rejects still-bound stale map");CloudSix.Source.CloudConfig.PublishSkyReflections.Value=true;
+        foreach(var mode in new[]{CloudSix.Source.FixtureTemporalMode.Off,CloudSix.Source.FixtureTemporalMode.Blend,CloudSix.Source.FixtureTemporalMode.Nubis}) {
+            CloudSix.Source.CloudConfig.TemporalMode.Value=mode;Check(provider.Read()==null,"non-publishing cloud mode rejects stale map: "+mode);
+        }
+        CloudSix.Source.CloudConfig.TemporalMode.Value=CloudSix.Source.FixtureTemporalMode.SkyDome;
+        var released=new RenderTexture(512,256,0,RenderTextureFormat.ARGBHalf);owned.Add(released);released.Create();released.Release();
+        Shader.SetGlobalTexture("_SsrSkyReflMap",released);Check(provider.Read()==null,"released cloud render texture is unavailable");
+        var oldScene=scene;scene=Solid(new Color(.2f,.3f,.4f,.7f));
+        using(var cb=new CommandBuffer())using(var p=new SsrReflectionPipeline(compute,blend,reflection,noise,native,gaussian)) {
+            var o=Options();o.Freeze=true;o.Temporal=false;p.Ensure(width,height,128,RenderTextureFormat.ARGBHalf);
+            void Render(){Globals(cb);TodGlobals(cb,.2f);p.Render(cb,camera,scene,camera.targetTexture,o,depths,normals,specular,true);Execute(cb);}
+            Shader.SetGlobalTexture("_SsrSkyReflMap",null);Render();var record=Read(p.TracePipeline.Record);var raw=Read(p.TracePipeline.Radiance);
+            Shader.SetGlobalTexture("_SsrSkyReflMap",map);Render();
+            Check(Error(record,Read(p.TracePipeline.Record))==0 && Error(raw,Read(p.TracePipeline.Radiance))==0,"cloud provider leaves geometry/sky/miss tracing bit exact");
+            Check(p.LastResetReason=="sky-provider or texture","provider activation resets NRD history");
+            o.Temporal=true;Render();Render();Check(p.UsedHistory,"steady cloud texture keeps history");
+            CloudSix.Source.CloudConfig.PublishSkyReflections.Value=false;Render();Check(!p.UsedHistory && p.LastResetReason=="sky-provider or texture","stale-provider rejection resets NRD history");
+            CloudSix.Source.CloudConfig.PublishSkyReflections.Value=true;o.Temporal=false;
+            Vector3 At(float y,float azimuth){float h=Mathf.Sqrt(1-y*y);return new Vector3(h*Mathf.Cos(azimuth),y,h*Mathf.Sin(azimuth));}
+            var directions=new[]{At(0,0),At(.0625f,Mathf.PI*.5f),At(.25f,-Mathf.PI*.5f),At(.5625f,Mathf.PI),Vector3.up,At(.25f,-Mathf.PI*.5f+.00001f),At(.25f,-Mathf.PI*.5f-.00001f)};
+            // Independently anchored publisher landmarks: +Z=u.5, +X=u.75,
+            // -Z=u0/1 (the seam), -X=u.25. The test texture encodes cos(2pi*u).
+            var expectedRed=new[]{.5f,.25f,.75f,.5f,.25f,.75f,.75f};
+            int count=p.TracePipeline.Record.width*p.TracePipeline.Record.height;
+            var records=new Color[count];var points=new Color[count];
+            for(int j=0;j<count;j++) {
+                int k=j%directions.Length;var d=camera.worldToCameraMatrix.MultiplyVector(directions[k]);
+                records[j]=new Color(.5f,.5f,100,2);points[j]=new Color(d.x,d.y,d.z,.98f);
+            }
+            Globals(cb);TodGlobals(cb,.2f);
+            cb.Blit(Sized(records,128,128),p.TracePipeline.Record);cb.Blit(Sized(points,128,128),p.TracePipeline.HitPoint);
+            cb.Blit(Solid(new Color(.6f,2,0,0)),p.TracePipeline.Hit);cb.Blit(Solid(new Color(9,8,7,.75f)),p.TracePipeline.Radiance);
+            cb.Blit(Solid(new Color(2,0,0,0)),p.TracePipeline.Depth[0]);
+            // A published map must work without a TOD atmosphere model.
+            cb.SetGlobalVector("TOD_kRadius",Vector4.zero);p.Reconstruct(cb,camera,scene,camera.targetTexture,o);Execute(cb);
+            var resolved=Read(p.Resolved);var receiver=Read(p.ReceiverFallback.Radiance)[0];
+            for(int k=0;k<directions.Length;k++) {
+                var d=directions[k];var sky=new Color(expectedRed[k],Mathf.Sqrt(d.y),.8f,0);
+                var expected=(receiver+sky*.75f)*.5f*.6f;expected.a=.6f;
+                Check(Error(new[]{resolved[k]},new[]{expected})<.002,"cloud angular mapping, HDR coverage and bounded blend direction="+k);
+            }
+            Check(Error(new[]{resolved[5]},new[]{resolved[6]})<.0001,"cloud azimuth seam is continuous");
+            Check(p.Nrd.Stats.Status==1,"CloudSix radiance passes through native NRD");
+            records[0]=new Color(0,0,0,0);records[1]=new Color(0,0,0,1);points[2]=new Color(0,-1,0,.98f);
+            Globals(cb);cb.SetGlobalVector("TOD_kRadius",Vector4.zero);cb.Blit(Sized(records,128,128),p.TracePipeline.Record);cb.Blit(Sized(points,128,128),p.TracePipeline.HitPoint);
+            p.Reconstruct(cb,camera,scene,camera.targetTexture,o);Execute(cb);resolved=Read(p.Resolved);
+            Check(resolved[0]==Color.clear && resolved[2]==Color.clear,"cloud map cannot fill unknown misses or downward sky without TOD");
+            Check(Error(new[]{resolved[1]},new[]{new Color(4.05f,3.6f,3.15f,.6f)})<.004,"geometry resolve remains independent of cloud sky");
+            o.View=ReflectionView.TodSkyRadiance;Globals(cb);p.Reconstruct(cb,camera,scene,camera.targetTexture,o);Execute(cb);Finite(Read(camera.targetTexture),"active cloud sky diagnostic");
+            o.View=ReflectionView.Normal;o.CaptureContinuation=true;Render();AsyncGPUReadback.WaitAllRequests();
+            var dir=Directory.GetDirectories("Capture-test/FTFX-SSR-Captures").OrderBy(x=>x).Last();
+            var snapshot=(RenderTexture)AccessTools.Field(typeof(SsrReflectionPipeline),"skyCapture").GetValue(p);
+            Check(snapshot.width==map.width && snapshot.height==map.height && Error(pixels,Read(snapshot))==0,"cloud capture snapshots exact map extent and linear pixels");
+            Check(File.Exists(Path.Combine(dir,"cloud-sky.exr")) && File.ReadAllText(Path.Combine(dir,"settings.txt")).Contains("SkyProvider=CloudSixGlobal"),"cloud sky capture records provider and replay texture");
+        }
+        scene=oldScene;Shader.SetGlobalTexture("_SsrSkyReflMap",null);
+    }
+    private sealed class NativeProbeFixture {
+        public int _faceNum=2,RenderedMask,Calls;
+        public float _nextRenderTime=Time.realtimeSinceStartup+100,RenderDelay=10;
+        public RenderTexture _cubeRT;
+        public static readonly Color NativeColour=new Color(.03f,.04f,.05f,1);
+        public void method_2() {
+            if(_nextRenderTime>=Time.realtimeSinceStartup && RenderDelay!=0)return;
+            RenderedMask=_faceNum<0?63:1<<(_faceNum==6?0:_faceNum);Calls++;
+            using(var cb=new CommandBuffer()) {
+                for(int f=0;f<6;f++)if((RenderedMask&(1<<f))!=0){cb.SetRenderTarget(_cubeRT,0,(CubemapFace)f);cb.ClearRenderTarget(false,true,NativeColour);}
+                cb.GenerateMips(_cubeRT);Graphics.ExecuteCommandBuffer(cb);
+            }
+            Shader.SetGlobalTexture("_MyGlobalReflectionProbe",_cubeRT);_faceNum=(_faceNum<0?0:_faceNum==6?1:_faceNum+1);
+            _nextRenderTime=Time.realtimeSinceStartup+RenderDelay;
+        }
+    }
+    private static void CloudProbeIntegration() {
+        var map=new Texture2D(512,256,TextureFormat.RGBAFloat,false,true){filterMode=FilterMode.Bilinear,wrapModeU=TextureWrapMode.Repeat,wrapModeV=TextureWrapMode.Clamp};owned.Add(map);
+        var pixels=new Color[512*256];
+        for(int y=0;y<256;y++)for(int x=0;x<512;x++) {
+            float yy=Mathf.Pow((y+.5f)/256,2),h=Mathf.Sqrt(1-yy*yy),phi=((x+.5f)/512-.5f)*2*Mathf.PI;
+            pixels[y*512+x]=new Color(.3f+.2f*h*Mathf.Sin(phi),.2f+.3f*yy,.5f+.2f*h*Mathf.Cos(phi),1);
+        }
+        map.SetPixels(pixels);map.Apply();Shader.SetGlobalTexture("_SsrSkyReflMap",map);
+        var cube=new RenderTexture(64,64,0,RenderTextureFormat.ARGBHalf){dimension=TextureDimension.Cube,useMipMap=true,autoGenerateMips=false,filterMode=FilterMode.Trilinear};cube.Create();owned.Add(cube);
+        var fixture=new NativeProbeFixture {_cubeRT=cube};var harmony=new Harmony("FTFX.CloudProbe.fixture");
+        var shader=AssetDatabase.LoadAssetAtPath<Shader>("Assets/CloudProbeAudit.shader");Check(shader!=null,"cloud probe sampling audit shader present");
+        var audit=new Material(shader);owned.Add(audit);audit.SetTexture("_Probe",cube);
+        var result=new RenderTexture(1,1,0,RenderTextureFormat.ARGBFloat);result.Create();owned.Add(result);
+        Color Sample(Vector3 direction,float lod=0){audit.SetVector("_Direction",new Vector4(direction.x,direction.y,direction.z,lod));Graphics.Blit(null,result,audit);return Read(result)[0];}
+        Color Expected(Vector3 d){d.Normalize();return new Color(.3f+.2f*d.x,.2f+.3f*d.y,.5f+.2f*d.z,1);}
+        using(var bridge=new CloudSkyProbe(reflection,typeof(NativeProbeFixture))) {
+            bridge.Requested=()=>true;CloudSkyProbe.Active=bridge;
+            harmony.Patch(bridge.Target,prefix:new HarmonyMethod(typeof(CloudSkyProbe),nameof(CloudSkyProbe.Before)),postfix:new HarmonyMethod(typeof(CloudSkyProbe),nameof(CloudSkyProbe.After)));
+            try {
+                fixture.method_2();Check(fixture.RenderedMask==63 && fixture.Calls==1,"cloud probe activation forces one complete native refresh");
+                var directions=new[]{new Vector3(1,.5f,0),new Vector3(-1,.5f,0),new Vector3(0,.5f,1),new Vector3(0,.5f,-1),Vector3.up,new Vector3(.5f,1,.5f),new Vector3(-.5f,1,-.5f)};
+                foreach(var d in directions)Check(Error(new[]{Sample(d)},new[]{Expected(d)})<.012,"native cubemap samples correct cloud direction "+d);
+                foreach(var d in new[]{Vector3.down,new Vector3(1,-.5f,0),new Vector3(0,-.5f,-1)})Check(Error(new[]{Sample(d)},new[]{NativeProbeFixture.NativeColour})<.001,"cloud probe preserves native lower hemisphere "+d);
+                var up=Sample(Vector3.up);Check(Error(new[]{Sample(Vector3.up,1)},new[]{up})<.01,"cloud probe regenerated roughness mips");
+                fixture.method_2();Check(fixture.Calls==1,"steady cloud provider preserves native render delay");
+                fixture._nextRenderTime=float.NegativeInfinity;fixture._faceNum=4;fixture.method_2();Check(fixture.Calls==2 && fixture.RenderedMask==16,"steady cloud provider uses native one-face update");
+                CloudSix.Source.CloudConfig.CustomSky.Value=false;fixture.method_2();
+                Check(fixture.Calls==3 && fixture.RenderedMask==63 && Error(new[]{Sample(Vector3.up)},new[]{NativeProbeFixture.NativeColour})<.001,"Custom Sky disable restores all native faces immediately");
+                fixture.method_2();Check(fixture.Calls==3,"disabled cloud provider leaves native cadence unchanged");
+                CloudSix.Source.CloudConfig.CustomSky.Value=true;fixture.method_2();Check(fixture.Calls==4 && Sample(Vector3.up).g>.4f,"Custom Sky re-enable restores bright native probe input");
+                var replacement=new RenderTexture(32,32,0,RenderTextureFormat.ARGBHalf){dimension=TextureDimension.Cube,useMipMap=true,autoGenerateMips=false};replacement.Create();owned.Add(replacement);
+                fixture._cubeRT=replacement;fixture.method_2();Check(fixture.Calls==5 && fixture.RenderedMask==63,"recreated probe receives complete cloud sky");
+                Check(cube.IsCreated(),"cloud bridge never releases native probe ownership");
+            } finally {harmony.UnpatchSelf();CloudSkyProbe.Active=null;CloudSix.Source.CloudConfig.CustomSky.Value=true;Shader.SetGlobalTexture("_SsrSkyReflMap",null);Shader.SetGlobalTexture("_MyGlobalReflectionProbe",null);}
+        }
+        Check(!ShaderUtil.ShaderHasError(shader),"cloud probe sampling audit compiles");
+    }
+    private static void CapturedCloudSkyOrientation() {
+        const string folder="20261005-133533-123";
+        var source=ReplayTexture(folder,"scene-source");var depth=ReplayTexture(folder,"trace-depth");var map=ReplayTexture(folder,"cloud-sky");
+        map.filterMode=FilterMode.Bilinear;map.wrapModeU=TextureWrapMode.Repeat;map.wrapModeV=TextureWrapMode.Clamp;
+        string root=Path.Combine(File.ReadAllText("game-path.txt").Trim(),"BepInEx/FTFX-SSR-Captures",folder);
+        var settings=File.ReadAllLines(Path.Combine(root,"settings.txt"));
+        var inverse=ReplayMatrix(settings.First(x=>x.StartsWith("RasterProjection="))).inverse;
+        var world=ReplayMatrix(settings.First(x=>x.StartsWith("CameraToWorld=")));
+        var colors=source.GetPixels();var depths=depth.GetPixels();var rays=new List<Vector3>();var expected=new List<Color>();
+        // These are primary camera sky directions, independent of our map decoding.
+        // The oracle is the cloud colour actually displayed in the captured frame.
+        for(int y=source.height/2;y<source.height;y+=32)for(int x=16;x<source.width;x+=64) {
+            int index=y*source.width+x;var h=inverse*new Vector4((x+.5f)/source.width*2-1,(y+.5f)/source.height*2-1,.5f,1);
+            var ray=new Vector3(h.x,h.y,h.z).normalized;
+            if(depths[index].r<9900 || world.MultiplyVector(ray).y<.02f)continue;
+            rays.Add(ray);expected.Add(colors[index]);
+        }
+        Check(rays.Count>400,"captured visible sky supplies independent direction/colour oracle");
+        var previousView=camera.worldToCameraMatrix;
+        camera.worldToCameraMatrix=world.inverse;Shader.SetGlobalTexture("_SsrSkyReflMap",map);
+        using(var cb=new CommandBuffer())using(var p=new SsrReflectionPipeline(compute,blend,reflection,noise,native,gaussian)) {
+            var o=Options();o.Temporal=false;o.View=ReflectionView.TodSkyRadiance;p.Ensure(width,height,128,RenderTextureFormat.ARGBHalf);
+            var points=new Color[128*128];
+            for(int j=0;j<points.Length;j++){var ray=rays[j%rays.Count];points[j]=new Color(ray.x,ray.y,ray.z,.98f);}
+            Globals(cb);cb.Blit(Sized(points,128,128),p.TracePipeline.HitPoint);
+            cb.Blit(Solid(new Color(0,0,100,2)),p.TracePipeline.Record);cb.Blit(Solid(new Color(1,2,0,0)),p.TracePipeline.Hit);
+            cb.Blit(Solid(new Color(0,0,0,1)),p.TracePipeline.Radiance);cb.Blit(Solid(new Color(2,0,0,0)),p.TracePipeline.Depth[0]);
+            p.Reconstruct(cb,camera,scene,camera.targetTexture,o);Execute(cb);
+            var actual=Read(camera.targetTexture);double sum=0;int count=0;
+            for(int y=0;y<height;y++)for(int x=0;x<width;x++) {
+                int tx=Math.Min(127,(int)((x+.5f)*128/width)),ty=Math.Min(127,(int)((y+.5f)*128/height));
+                var a=actual[y*width+x];var e=expected[(ty*128+tx)%expected.Count];
+                sum+=Math.Abs(a.r-e.r)+Math.Abs(a.g-e.g)+Math.Abs(a.b-e.b);count+=3;
+            }
+            Check(sum/count<.015,"CloudSix lookup matches captured displayed volumetric clouds; mean RGB error="+(sum/count));
+        }
+        camera.worldToCameraMatrix=previousView;Shader.SetGlobalTexture("_SsrSkyReflMap",null);
     }
     private static void Lifecycle() {
         using(var cb=new CommandBuffer())using(var p=new SsrReflectionPipeline(compute,blend,reflection,noise,native,gaussian)) {

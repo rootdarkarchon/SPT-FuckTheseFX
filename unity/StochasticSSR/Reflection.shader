@@ -8,6 +8,11 @@ Shader "Hidden/FTFX/StochasticSSR/Reflection"
   #include "TodReflection.hlsl"
   Texture2D<float4> _MainTex,_Raw,_Guide,_Point,_Record,_Signal;
   Texture2D<float4> _UnfilledSignal;
+  Texture2D<float4> _CloudSky;
+  SamplerState sampler_CloudSky;
+  float _CloudSkyAvailable;
+  int _CloudProbeFace;
+  float _CloudProbeSize;
   SamplerState sampler_Signal;
   float4 _NativeReconstruction; // enabled, maximum generated mip
   Texture2D<float4> _TraceInfo,_TraceStop;
@@ -38,13 +43,29 @@ Shader "Hidden/FTFX/StochasticSSR/Reflection"
   float4 _ZBufferParams;
   struct V { float4 p:SV_POSITION; };
   V Vert(float3 p:POSITION) { V o;o.p=float4(p.xy,0,1);return o; }
+  float3 ReflectedSky(float3 direction);
+  float3 CloudProbeDirection(float2 pixel) {
+   float2 p=pixel/_CloudProbeSize*2-1;
+   if(_CloudProbeFace==0)return normalize(float3(1,-p.y,-p.x));
+   if(_CloudProbeFace==1)return normalize(float3(-1,-p.y,p.x));
+   if(_CloudProbeFace==2)return normalize(float3(p.x,1,p.y));
+   if(_CloudProbeFace==3)return normalize(float3(p.x,-1,-p.y));
+   if(_CloudProbeFace==4)return normalize(float3(p.x,-p.y,1));
+   return normalize(float3(-p.x,-p.y,-1));
+  }
   float4 ReplayInput(V i):SV_Target {
+   if(_ReplayInput==7) {
+    float3 direction=CloudProbeDirection(i.p.xy);
+    if(direction.y<=0)discard;
+    return float4(ReflectedSky(direction),1);
+   }
    int3 p=int3((int2)i.p.xy,0);
    if(_ReplayInput==1)return _CameraGBufferTexture0.Load(p);
    if(_ReplayInput==2)return _CameraGBufferTexture1.Load(p);
    if(_ReplayInput==3)return _CameraGBufferTexture2.Load(p);
    if(_ReplayInput==4)return float4(_CameraMotionVectorsTexture.Load(p),0,0);
    if(_ReplayInput==5)return float4(_WaterCoverage.Load(p),0,0);
+   if(_ReplayInput==6)return _CloudSky.Load(p);
    return _MainTex.Load(p);
   }
   int2 TracePixel(V i) { return min((int2)i.p.xy,(int2)_Size.zw-1); }
@@ -101,8 +122,19 @@ Shader "Hidden/FTFX/StochasticSSR/Reflection"
    if(water.x<=0 || !all(isfinite(water)) || abs(eye-water.x)>max(.005,eye*.0001))return float2(0,1);
    return float2(1,1);
   }
+  bool CloudSkyAvailable(float3 direction) { return _CloudSkyAvailable>.5 && direction.y>=0; }
+  float3 ReflectedSky(float3 direction) {
+   if(CloudSkyAvailable(direction)) {
+    // CloudSix 4.0 publish pass: phi=(u-.5)*2pi, world Y=v*v,
+    // world X=sin(phi)*sqrt(1-Y*Y), world Z=cos(phi)*sqrt(1-Y*Y).
+    float u=dot(direction.xz,direction.xz)>1e-12?atan2(direction.x,direction.z)*.159154943091895+.5:.5;
+    // GGX already samples the reflection lobe; a roughness mip here would blur it twice.
+    return _CloudSky.SampleLevel(sampler_CloudSky,float2(u,sqrt(saturate(direction.y))),0).rgb;
+   }
+   return TodReflectedSky(direction);
+  }
   float3 SkyRadiance(int2 pixel,float3 direction,float visibility) {
-   float3 sky=TodReflectedSky(direction)*saturate(direction.y+_ReflectionBottomShade)*visibility;
+   float3 sky=ReflectedSky(direction)*saturate(direction.y+_ReflectionBottomShade)*visibility;
    // Confirmed sky uses the native bounded blend. Smith applies only to sky.
    return lerp(ReceiverRadiance(pixel),sky,.5);
   }
@@ -114,7 +146,7 @@ Shader "Hidden/FTFX/StochasticSSR/Reflection"
    if(record.w==2) {
     float3 direction=normalize(mul((float3x3)SsrRasterMatrix(_CameraToWorld,8),_Point.Load(int3(p,0)).xyz));
     float3 local=mul((float3x3)TOD_World2Sky,direction);
-    if(!TodAvailable() || dot(local,local)<1e-8)return 0;
+    if(!CloudSkyAvailable(direction) && (!TodAvailable() || dot(local,local)<1e-8))return 0;
     // Compatibility sky branch: native TOD is a bounded scattering blend,
     // not an unconditional replacement. At infinite sky distance its maximum
     // blend is 0.5. Retain the native receiver signal as the other half; apply
@@ -337,7 +369,7 @@ Shader "Hidden/FTFX/StochasticSSR/Reflection"
     float3 ray=_Point.Load(int3(p,0)).xyz;
     if(record.w==1)ray-=ViewPosition((Receiver(p)+.5)/_Size.xy,guide.y);
     float3 skyDirection=dot(ray,ray)>1e-8?normalize(mul((float3x3)SsrRasterMatrix(_CameraToWorld,8),ray)):direction;
-    return float4(TodReflectedSky(skyDirection),1);
+    return float4(ReflectedSky(skyDirection),1);
    }
    if(view==6)return float4(probe,1);
    if(view==7)return float4(record.w==1?float3(0,1,0):record.w==2?float3(0,0,1):record.w<0?float3(1,0,0):float3(.5,.5,.5),1);

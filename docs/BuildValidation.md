@@ -30,6 +30,8 @@ The current suite uses `BeforeNrdStandard` as its only historical rendering base
 
 Each needs `settings.txt` and `scene-source.exr`, `gbuffer0.exr`, `gbuffer1.exr`, `gbuffer2.exr`, `trace-depth.exr` and `water.exr`. These inputs are not shipped or stored in Git. A fresh checkout without them cannot run the complete capture parity suite; do not substitute unrelated captures and claim the same regression. The fixture reads projection and camera transforms from their settings.
 
+The CloudSix direction regression additionally requires `20261005-133533-123` with `settings.txt`, `scene-source.exr`, `trace-depth.exr` and `cloud-sky.exr`. It compares the GPU sky lookup against clouds actually displayed at independently reconstructed primary-camera directions. This catches swapped azimuth axes that a synthetic publisher/consumer round trip can miss.
+
 ## Water reference and validation
 
 Use Python with UnityPy for reference extraction. The extraction verifies the installed water asset hash and writes local native shader oracles under `obj/WaterValidation`:

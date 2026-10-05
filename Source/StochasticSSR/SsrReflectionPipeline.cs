@@ -15,7 +15,9 @@ namespace FuckTheseFX.Source.StochasticSSR
         private readonly ComputeShader gaussian;
         internal string LastResetReason {get;private set;}="initial";
         internal RenderTexture Resolved;
-        private RenderTexture coverageCapture,haloCapture,fallbackCapture,gapCapture;
+        private RenderTexture coverageCapture,haloCapture,fallbackCapture,gapCapture,skyCapture,probeCapture;
+        private readonly SsrSkySource skySource=new SsrSkySource();
+        private int previousSky,previousSkyWidth,previousSkyHeight;
         private readonly RenderTexture[] replayInputs=new RenderTexture[6];
         private readonly ContinuationCapture continuationCapture=new ContinuationCapture();
         internal enum Pass { Resolve,Compose,ReplayInput,ComposeNormal }
@@ -99,7 +101,15 @@ namespace FuckTheseFX.Source.StochasticSSR
             var p=TracePipeline;var projection=GL.GetGPUProjectionMatrix(camera.projectionMatrix,false);
             continuationCapture.Rearm(o.CaptureContinuation,o.CaptureTraversal);
             bool nativeReconstruction=o.Reconstruction==ReflectionReconstruction.NativeGaussian;
+            var sky=skySource.Read();
+            int skyId=sky!=null?sky.GetInstanceID():0,skyWidth=sky!=null?sky.width:0,skyHeight=sky!=null?sky.height:0;
+            if(skyId!=previousSky || skyWidth!=previousSkyWidth || skyHeight!=previousSkyHeight) {
+                ResetHistory();LastResetReason="sky-provider or texture";
+                previousSky=skyId;previousSkyWidth=skyWidth;previousSkyHeight=skyHeight;
+            }
             properties.Clear();
+            properties.SetTexture("_CloudSky",sky!=null?sky:Texture2D.blackTexture);
+            properties.SetFloat("_CloudSkyAvailable",sky!=null?1:0);
             properties.SetVector("_NativeReconstruction",Vector4.zero);
             properties.SetBuffer("_SsrRasterState",p.Raster.Buffer);properties.SetFloat("_SsrLateRaster",p.Raster.Enabled?1:0);
             var water=WaterReflectionCapture.Get(camera,p.CameraWidth,p.CameraHeight);
@@ -146,6 +156,10 @@ namespace FuckTheseFX.Source.StochasticSSR
                     EnsureCapture(ref replayInputs[k],p.CameraWidth,p.CameraHeight);
                     CaptureReplayInput(cb,source,replayInputs[k],k);
                 }
+                if(sky!=null) {
+                    EnsureCapture(ref skyCapture,sky.width,sky.height);
+                    CaptureReplayInput(cb,source,skyCapture,6);
+                }
             }
             bool alias=source.Equals(destination);
             using(SsrGpuSample.Measure(cb,camera,"Environment replacement"))Draw(cb,source,alias?new RenderTargetIdentifier(p.NativeResult):destination,o.View==ReflectionView.Normal?Pass.ComposeNormal:Pass.Compose);
@@ -155,6 +169,8 @@ namespace FuckTheseFX.Source.StochasticSSR
                 EnsureCapture(ref haloCapture,p.CameraWidth,p.CameraHeight);
                 EnsureCapture(ref fallbackCapture,p.CameraWidth,p.CameraHeight);
                 EnsureCapture(ref gapCapture,p.CameraWidth,p.CameraHeight);
+                EnsureCapture(ref probeCapture,p.CameraWidth,p.CameraHeight);
+                properties.SetVector("_ReflectionOptions",new Vector4(o.Smoothness,6,0,0));Draw(cb,source,probeCapture,Pass.Compose);
                 properties.SetVector("_ReflectionOptions",new Vector4(o.Smoothness,26,0,0));Draw(cb,source,coverageCapture,Pass.Compose);
                 properties.SetVector("_ReflectionOptions",new Vector4(o.Smoothness,33,0,0));Draw(cb,source,haloCapture,Pass.Compose);
                 properties.SetVector("_ReflectionOptions",new Vector4(o.Smoothness,28,0,0));Draw(cb,source,fallbackCapture,Pass.Compose);
@@ -166,15 +182,18 @@ namespace FuckTheseFX.Source.StochasticSSR
                 };
                 targets.Add("nrd-normal-roughness",Nrd.Normal);targets.Add("nrd-receiver-hit-distance-eligibility",Nrd.Receiver);
                 targets.Add("nrd-motion",Nrd.Motion);targets.Add("nrd-display",Nrd.Output);
+                targets.Add("environment-probe",probeCapture);targets.Add("receiver-radiance",ReceiverFallback.Radiance);
                 string[] inputNames={"scene-source","gbuffer0","gbuffer1","gbuffer2","motion","water"};
                 for(int k=0;k<replayInputs.Length;k++)targets.Add(inputNames[k],replayInputs[k]);
+                if(sky!=null)targets.Add("cloud-sky",skyCapture);
                 string metadata="Denoiser=NRD_REBLUR_SPECULAR"+"\nDirection=Ggx\nDepthGapFill=ReceiverColourFallback\nSourceBlend=0\nRelaxReturn=True\nSkyAfterContinuation=True\nSkyRecoveryScope=AllEligible\nSpatial=False\nHitAware=False\nShallowFade=0\nTraceShape=Square\nReconstruction="+o.Reconstruction+
+                    "\nSkyProvider="+(sky!=null?"CloudSixGlobal":"TOD")+"\nCloudSkyMapping=atan2(x,z)/(2pi)+0.5,sqrt(y); upper hemisphere; mip 0"+
                     "\nProjection="+MatrixText(projection)+"\nCameraToWorld="+MatrixText(camera.cameraToWorldMatrix)+
                     "\nPreviousView="+MatrixText(previousView)+"\nPreviousProjection="+MatrixText(GL.GetGPUProjectionMatrix(previousProjection,false))+"\nHistoryValid="+UsedHistory+"\nLastResetReason="+LastResetReason;
                 var rasterSnapshot=p.Raster.Current;
                 continuationCapture.Request(cb,targets,o,p.CameraWidth,p.CameraHeight,metadata,
                     rasterSnapshot!=null?(Func<string>)(()=>rasterSnapshot.Metadata()):null);
-            } else if(!continuationCapture.Pending) {Drop(ref coverageCapture);Drop(ref haloCapture);Drop(ref fallbackCapture);Drop(ref gapCapture);for(int k=0;k<replayInputs.Length;k++)Drop(ref replayInputs[k]);}
+            } else if(!continuationCapture.Pending) {Drop(ref coverageCapture);Drop(ref haloCapture);Drop(ref fallbackCapture);Drop(ref gapCapture);Drop(ref skyCapture);Drop(ref probeCapture);for(int k=0;k<replayInputs.Length;k++)Drop(ref replayInputs[k]);}
             valid=o.Temporal;
         }
         private void RequireNrd() {
@@ -205,6 +224,8 @@ namespace FuckTheseFX.Source.StochasticSSR
         private void Release() {
             ResetHistory();for(int i=0;i<replayInputs.Length;i++)Drop(ref replayInputs[i]);
             Drop(ref coverageCapture);Drop(ref haloCapture);Drop(ref fallbackCapture);Drop(ref gapCapture);
+            Drop(ref skyCapture);
+            Drop(ref probeCapture);
             Drop(ref Resolved);
         }
         public void Dispose() {if(disposed)return;disposed=true;continuationCapture.Dispose();Release();RetireNrd();if(NativeReconstruction!=null)continuationCapture.ReleaseWhenComplete(NativeReconstruction.Dispose);NativeReconstruction=null;ReceiverFallback.Dispose();TracePipeline.Dispose();UnityEngine.Object.DestroyImmediate(material);UnityEngine.Object.DestroyImmediate(triangle);}

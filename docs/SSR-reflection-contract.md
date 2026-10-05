@@ -40,7 +40,7 @@ max(S - E, 0) + T * W * (c * R + f * (1 - c) * B)
 
 Scene alpha is preserved. E includes roughness-filtered probe, normalized-normal material response, bottom shade, GBuffer0 alpha, SSR factor and stencil visibility. W preserves native reflected-signal response using smoothness cubed and the original unnormalized G-buffer normal. These are distinct material domains. Environment reflection is removed once; SSR is not added on top of unchanged probe reflection.
 
-Confirmed TOD sky retains the established bounded half-receiver/half-sky blend. Only the sky component receives sampled Smith amplitude. Missing reflected geometry remains unavailable; first-rejection foreground colour is diagnostic only.
+Confirmed sky retains the established bounded half-receiver/half-sky blend. Only the sky component receives sampled Smith amplitude. Missing reflected geometry remains unavailable; first-rejection foreground colour is diagnostic only. CloudSix's published upper sky can supply both confirmed sky radiance and the native sky-only probe input through the optional SSR integration. Probe repair precedes scene lighting and receiver-colour fallback; it does not add measured ray coverage or change environment subtraction.
 
 Below-cutoff and out-of-range receivers skip SSR/fallback and use the environment-removed source scene blended toward incoming lighting by Cutoff environment blend. Range is radial camera-to-receiver distance; reflected source distance is unrestricted. Zero-smoothness probe substitution has its own material-weighted, distance-faded contribution and removes any eligible existing environment term once.
 

@@ -18,6 +18,7 @@ namespace FuckTheseFX.Source.StochasticSSR
         private SsrHooks hooks;
         private Harmony harmony;
         private WaterReflectionCapture waterCapture;
+        private CloudSkyProbe cloudProbe;
         private bool previousEnabled, suspended;
         private int frames;
         internal StochasticSsrIntegration(string path, SsrSettings settings) { this.path=path;this.settings=settings; }
@@ -57,6 +58,14 @@ namespace FuckTheseFX.Source.StochasticSSR
                 var render=AccessTools.Method(renderer,"Render");
                 if(render==null)throw new MissingMethodException("Native SSR render contract missing");
                 harmony.Patch(render,prefix:new HarmonyMethod(typeof(SsrHooks),nameof(SsrHooks.Before)),finalizer:new HarmonyMethod(typeof(SsrHooks),nameof(SsrHooks.After)));
+                try {
+                    cloudProbe=new CloudSkyProbe(reflection,AccessTools.TypeByName("AmbientLight")) {
+                        Requested=()=>!suspended && settings.Enabled.Value
+                    };
+                    harmony.Patch(cloudProbe.Target,prefix:new HarmonyMethod(typeof(CloudSkyProbe),nameof(CloudSkyProbe.Before)),
+                        postfix:new HarmonyMethod(typeof(CloudSkyProbe),nameof(CloudSkyProbe.After)));
+                    CloudSkyProbe.Active=cloudProbe;
+                } catch(Exception error) {cloudProbe?.Dispose();cloudProbe=null;Plugin.MyLog.LogWarning("CloudSix native sky probe compatibility unavailable. "+error);}
                 previousEnabled=settings.Enabled.Value;
                 Plugin.MyLog.LogInfo("Stochastic SSR ready: NRD-denoised reflections; optics and disabled SSR retain native behavior.");
             }
@@ -83,6 +92,7 @@ namespace FuckTheseFX.Source.StochasticSSR
             AmbientSurfaceCapture.Dispose();
             waterCapture?.Dispose();waterCapture=null;
             harmony?.UnpatchSelf();harmony=null;hooks?.Dispose();hooks=null;
+            cloudProbe?.Dispose();cloudProbe=null;
             if(noise!=null)UnityEngine.Object.Destroy(noise);noise=null;
             if(bundle!=null)bundle.Unload(true);bundle=null;
         }

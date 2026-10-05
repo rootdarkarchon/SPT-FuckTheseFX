@@ -1,4 +1,4 @@
-param([string]$SptInstallPath='D:\Tarkov-SPT-4.1')
+param([string]$SptInstallPath='D:\Tarkov-SPT-4.1', [string]$AssemblyPath='')
 $ErrorActionPreference='Stop'
 $repo=Split-Path $PSScriptRoot -Parent
 Add-Type -Path (Join-Path $SptInstallPath 'BepInEx/core/Mono.Cecil.dll')
@@ -6,7 +6,8 @@ $resolver=[Mono.Cecil.DefaultAssemblyResolver]::new()
 $resolver.AddSearchDirectory((Join-Path $SptInstallPath 'BepInEx/core'))
 $resolver.AddSearchDirectory((Join-Path $SptInstallPath 'EscapeFromTarkov_Data/Managed'))
 $reader=[Mono.Cecil.ReaderParameters]::new();$reader.AssemblyResolver=$resolver
-$assembly=[Mono.Cecil.AssemblyDefinition]::ReadAssembly((Join-Path $repo 'bin/Release/netstandard2.1/FuckTheseFX.dll'),$reader)
+if(-not $AssemblyPath){$AssemblyPath=Join-Path $repo 'bin/Release/netstandard2.1/FuckTheseFX.dll'}
+$assembly=[Mono.Cecil.AssemblyDefinition]::ReadAssembly($AssemblyPath,$reader)
 try {
     $types=$assembly.MainModule.Types
     $plugin=$types | Where-Object FullName -eq 'FuckTheseFX.Plugin'
@@ -51,8 +52,23 @@ try {
         $method=$plugin.Methods | Where-Object Name -eq $name
         if(-not ($method.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.DeclaringType.Name -eq 'StochasticSsrIntegration' })) { throw "SSR lifecycle missing: $name" }
     }
-    if($assembly.MainModule.AssemblyReferences | Where-Object Name -match 'SsrPrototype|SSRSix') { throw 'Release SSR must not depend on another plugin assembly' }
+    if(-not ($types | Where-Object { $_.Namespace -eq 'FuckTheseFX.Source.StochasticSSR' -and $_.Name -eq 'SsrSkySource' })) {throw 'Optional CloudSix sky source missing'}
+    if(-not ($types | Where-Object { $_.Namespace -eq 'FuckTheseFX.Source.StochasticSSR' -and $_.Name -eq 'CloudSkyProbe' })) {throw 'Optional CloudSix native probe bridge missing'}
+    if($assembly.MainModule.AssemblyReferences | Where-Object Name -match 'SsrPrototype|SSRSix|CloudSix') { throw 'Release SSR must not depend on another plugin assembly' }
 } finally { $assembly.Dispose();$resolver.Dispose() }
+$game=[Mono.Cecil.AssemblyDefinition]::ReadAssembly((Join-Path $SptInstallPath 'EscapeFromTarkov_Data/Managed/Assembly-CSharp.dll'))
+try {
+    $ambient=$game.MainModule.Types | Where-Object Name -eq 'AmbientLight'
+    foreach($pair in @(@('_faceNum','System.Int32'),@('_nextRenderTime','System.Single'),@('RenderDelay','System.Single'),@('_cubeRT','UnityEngine.RenderTexture'))) {
+        if(-not ($ambient.Fields | Where-Object { $_.Name -eq $pair[0] -and $_.FieldType.FullName -eq $pair[1] })) {throw "Native sky probe field changed: $($pair[0])"}
+    }
+    $refresh=$ambient.Methods | Where-Object { $_.Name -eq 'method_2' -and $_.Parameters.Count -eq 0 -and $_.ReturnType.FullName -eq 'System.Void' }
+    $renders=@($refresh.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.DeclaringType.FullName -eq 'UnityEngine.Camera' -and $_.Operand.Name -eq 'RenderToCubemap' -and $_.Operand.Parameters.Count -eq 2 })
+    if($renders.Count -ne 2 -or -not ($refresh.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.FieldReference] -and $_.Operand.Name -eq '_faceNum' }) -or
+       -not ($refresh.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.Name -eq 'SetGlobalTexture' })) {throw 'Native sky-only probe update/publish contract changed'}
+    foreach($clip in @([single]0.1,[single]0.2)){if(-not ($refresh.Body.Instructions | Where-Object { $_.OpCode.Name -eq 'ldc.r4' -and $_.Operand -eq $clip })) {throw 'Native sky-only probe clip range changed'}}
+    Write-Output 'Verified CloudSix bridge targets the installed sky-only cubemap, native update cadence and global probe publication.'
+} finally {$game.Dispose()}
 if((Get-FileHash (Join-Path $SptInstallPath 'EscapeFromTarkov_Data/Managed/Unity.Postprocessing.Runtime.dll')).Hash -ne 'B8055ECC0C1A6BA0A04427066A3DEF8C87DA90C1EAC071FA72D8193521441548') { throw 'Native SSR ABI changed' }
 $project=Join-Path $repo 'obj/NrdStandardValidation'
 $result=Get-Item (Join-Path $project 'validation.txt')
@@ -90,3 +106,4 @@ Write-Output 'Verified SSR compatibility, lifecycle, release-only code, pinned A
 if((Get-FileHash (Join-Path $repo 'Assets/nrdssr')).Hash -ne (Get-FileHash (Join-Path $project 'Output/nrdssr')).Hash) {throw 'NRD bundle differs from validated bundle'}
 if((Get-FileHash (Join-Path $repo 'obj/NRD/bridge/Release/FTFXNrd.dll')).Hash -ne (Get-FileHash (Join-Path $project 'Native/FTFXNrd.dll')).Hash) {throw 'Native NRD DLL differs from tested DLL'}
 if((Get-FileHash (Join-Path $repo 'unity/StochasticSsrValidation/NrdStandardValidation.cs')).Hash -ne (Get-FileHash (Join-Path $project 'Assets/Editor/NrdStandardValidation.cs')).Hash) {throw 'Untested NRD removal validation'}
+if((Get-FileHash (Join-Path $repo 'unity/StochasticSsrValidation/CloudProbeAudit.shader')).Hash -ne (Get-FileHash (Join-Path $project 'Assets/CloudProbeAudit.shader')).Hash) {throw 'Untested cubemap sampling audit'}
