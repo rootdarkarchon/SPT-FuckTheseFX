@@ -60,7 +60,7 @@ public static class NrdStandardValidation {
             var go=new GameObject("NRD standard fixture");owned.Add(go);camera=go.AddComponent<Camera>();camera.enabled=false;camera.renderingPath=RenderingPath.DeferredShading;camera.allowHDR=true;camera.nearClipPlane=.1f;camera.farClipPlane=500;camera.fieldOfView=65;
             rendererType=AccessTools.TypeByName("UnityEngine.Rendering.PostProcessing.ScreenSpaceReflectionsRenderer");
             var factory=new PropertySheetFactory();var context=Context(factory);context.command.Dispose();factory.Release();Fixture();
-            ConfigContracts();RejectionDiagnosticsLifecycle();SyntheticParity();CloudSkyIntegration();CloudProbeIntegration();CapturedCloudSkyOrientation();Lifecycle();Routing();CapturedParity();
+            ConfigContracts();RejectionDiagnosticsLifecycle();SyntheticParity();CloudSkyIntegration();NativeFogParity();CloudProbeIntegration();CapturedCloudSkyOrientation();Lifecycle();Routing();CapturedParity();
             foreach(var sh in new[]{reflection,NrdSpecularBackend.ValidationShader,blend})Check(!ShaderUtil.GetShaderMessages(sh).Any(m=>m.severity.ToString()=="Error"),"executed shader compiles: "+sh.name);
             Check(!ShaderUtil.GetComputeShaderMessages(compute).Any(m=>m.severity.ToString()=="Error"),"executed Hi-Z variants compile");
             var ssr=new AssetBundleBuild {assetBundleName="stochasticssr",assetNames=new[]{"Assets/HiZ.compute","Assets/Support.shader","Assets/Reflection.shader","Assets/WaterCapture.shader","Assets/AMD/BlueNoise.bytes"}};
@@ -105,6 +105,7 @@ public static class NrdStandardValidation {
         if(whiteGBuffer==null || whiteGBuffer.width!=width || whiteGBuffer.height!=height)whiteGBuffer=Texture(Enumerable.Repeat(Color.white,width*height).ToArray());
         cb.SetGlobalTexture("_CameraGBufferTexture0",materialOcclusion != null ? materialOcclusion : whiteGBuffer);cb.SetGlobalTexture("_StencilShadow",Texture2D.blackTexture);cb.SetGlobalTexture("_CameraMotionVectorsTexture",Texture2D.blackTexture);
         cb.SetGlobalFloat("_SSRFactor",1);cb.SetGlobalFloat("_ReflectionBottomShade",1);cb.SetGlobalVector("_WorldSpaceCameraPos",camera.transform.position);
+        cb.SetGlobalVector("_Density",Vector4.zero);
         cb.SetGlobalVector("_ProjectionParams",new Vector4(1,camera.nearClipPlane,camera.farClipPlane,1/camera.farClipPlane));
         cb.SetGlobalVector("_ScreenParams",new Vector4(width,height,1+1f/width,1+1f/height));cb.SetGlobalVector("_Time",Vector4.zero);
         float f=camera.farClipPlane,n=camera.nearClipPlane;cb.SetGlobalVector("_ZBufferParams",SystemInfo.usesReversedZBuffer?new Vector4(f/n-1,1,(f/n-1)/f,1/f):new Vector4(1-f/n,f/n,(1-f/n)/f,1/n));
@@ -178,15 +179,18 @@ public static class NrdStandardValidation {
     private static void Parity(string label,int size,int frames,Options o,Action<int> animate=null,bool diagnostics=false) {
         var oldCompute=AssetDatabase.LoadAssetAtPath<ComputeShader>("Assets/BeforeNrdStandard/HiZ.compute");var oldReflection=AssetDatabase.LoadAssetAtPath<Shader>("Assets/BeforeNrdStandard/Reflection.shader");
         using(var cb=new CommandBuffer())using(var a=new Before.ConfidenceSsrPipeline(oldCompute,blend,oldReflection,noise,native,gaussian))using(var b=new SsrReflectionPipeline(compute,blend,reflection,noise,native,gaussian)) {
+            var fogExcluded=Solid(new Color(0,0,0,1));
             a.Ensure(width,height,size,RenderTextureFormat.ARGBHalf);b.Ensure(width,height,size,RenderTextureFormat.ARGBHalf);
             var beforeTarget=new RenderTexture(width,height,0,RenderTextureFormat.ARGBHalf);beforeTarget.Create();owned.Add(beforeTarget);
             for(int frame=0;frame<frames;frame++) {
                 animate?.Invoke(frame);
                 if(frame==frames/2 && frames>4){a.ResetHistory();b.ResetHistory();}
                 AccessTools.Field(typeof(Before.ConfidenceSsrPipeline),"lastTime").SetValue(a,Time.realtimeSinceStartup);
-                Globals(cb);TodGlobals(cb,.2f);a.Render(cb,camera,scene,beforeTarget,Baseline(o),depths,normals,specular,diagnostics);Execute(cb);
+                // Isolate the pre-fog historical pipeline. Active scattering has
+                // its own oracle against the installed native resolve below.
+                Globals(cb);TodGlobals(cb,.2f);cb.SetGlobalTexture("_StencilShadow",fogExcluded);a.Render(cb,camera,scene,beforeTarget,Baseline(o),depths,normals,specular,diagnostics);Execute(cb);
                 AccessTools.Field(typeof(SsrReflectionPipeline),"lastTime").SetValue(b,Time.realtimeSinceStartup);
-                Globals(cb);TodGlobals(cb,.2f);b.Render(cb,camera,scene,camera.targetTexture,o,depths,normals,specular,diagnostics);Execute(cb);
+                Globals(cb);TodGlobals(cb,.2f);cb.SetGlobalTexture("_StencilShadow",fogExcluded);b.Render(cb,camera,scene,camera.targetTexture,o,depths,normals,specular,diagnostics);Execute(cb);
                 Check(a.Nrd.Stats.Status==1 && b.Nrd.Stats.Status==1 && b.Nrd.Stats.Failures==0,label+" native NRD dispatched frame "+frame);
                 var resources=new[]{(Read(a.TracePipeline.Record),Read(b.TracePipeline.Record),"classification"),(Read(a.TracePipeline.Radiance),Read(b.TracePipeline.Radiance),"raw"),(Read(a.Resolved),Read(b.Resolved),"resolve"),(Read(a.Nrd.Output),Read(b.Nrd.Output),"NRD"),(Read(beforeTarget),Read(camera.targetTexture),"composition")};
                 foreach(var row in resources){double error=Error(row.Item1,row.Item2);Check(error==0,label+" exact "+row.Item3+" frame="+frame+" max="+error+" phases="+a.TracePipeline.LastSamplePhase+","+b.TracePipeline.LastSamplePhase);Finite(row.Item2,label+" "+row.Item3);}
@@ -296,6 +300,82 @@ public static class NrdStandardValidation {
             Shader.SetGlobalTexture("_MyGlobalReflectionProbe",_cubeRT);_faceNum=(_faceNum<0?0:_faceNum==6?1:_faceNum+1);
             _nextRenderTime=Time.realtimeSinceStartup+RenderDelay;
         }
+    }
+    private static void NativeFogParity() {
+        var oldScene=scene;var oldDepth=depths;var oldView=camera.worldToCameraMatrix;
+        var oldPosition=camera.transform.position;var oldRotation=camera.transform.rotation;
+        camera.transform.SetPositionAndRotation(new Vector3(7,12,-4),Quaternion.Euler(8,37,-3));camera.ResetWorldToCameraMatrix();
+        scene=Solid(new Color(.2f,.3f,.4f,.7f));
+        var projection=GL.GetGPUProjectionMatrix(camera.projectionMatrix,false);var inverse=projection.inverse;
+        Vector3 Position(Vector2 uv,float eye) {var h=inverse*new Vector4(uv.x*2-1,uv.y*2-1,.5f,1);return new Vector3(h.x,h.y,h.z)*(eye/-h.z);}
+        var count=width*height;
+        var nativeTarget=new RenderTexture(width,height,0,RenderTextureFormat.ARGBFloat);nativeTarget.Create();owned.Add(nativeTarget);
+        var factory=new PropertySheetFactory();var sheet=factory.Get(native);
+        using(var cb=new CommandBuffer())using(var p=new SsrReflectionPipeline(compute,blend,reflection,noise,native,gaussian)) {
+            try {
+                var o=Options();o.Temporal=false;p.Ensure(width,height,width,height,RenderTextureFormat.ARGBHalf);
+                foreach(var test in new[]{
+                    (eye:2f,density:new Vector4(0,0,0,0),stencil:0f,smith:.75f),
+                    (eye:20f,density:new Vector4(0,0,.04f,0),stencil:0f,smith:.75f),
+                    (eye:160f,density:new Vector4(.3f,20,.04f,0),stencil:0f,smith:.75f),
+                    (eye:160f,density:new Vector4(.3f,-20,.04f,0),stencil:.25f,smith:.75f),
+                    (eye:160f,density:new Vector4(0,0,3,0),stencil:0f,smith:.75f),
+                    (eye:160f,density:new Vector4(0,0,3,0),stencil:1f,smith:.75f),
+                    (eye:20f,density:new Vector4(0,0,.04f,0),stencil:0f,smith:0f)}) {
+                    var records=new Color[count];var points=new Color[count];var hits=new Color[count];var z=new Color[count];
+                    for(int j=0;j<count;j++) {
+                        var uv=new Vector2((j%width+.5f)/width,(j/width+.5f)/height);var v=Position(uv,test.eye);
+                        records[j]=new Color(j%width,j/width,0,1);points[j]=new Color(v.x,v.y,v.z,.98f);
+                        hits[j]=new Color(uv.x,uv.y,.6f,1);var clip=projection*new Vector4(v.x,v.y,v.z,1);z[j]=new Color(clip.z/clip.w,0,0,0);
+                    }
+                    depths=Texture(z);Globals(cb);TodGlobals(cb,.2f);cb.SetGlobalVector("_Density",test.density);
+                    cb.SetGlobalTexture("_StencilShadow",Solid(new Color(0,0,0,test.stencil)));
+                    cb.Blit(Texture(records),p.TracePipeline.Record);cb.Blit(Texture(points),p.TracePipeline.HitPoint);
+                    cb.Blit(Solid(new Color(.6f,2,0,0)),p.TracePipeline.Hit);cb.Blit(Solid(new Color(.2f,.3f,.4f,test.smith)),p.TracePipeline.Radiance);
+                    cb.Blit(Solid(new Color(2,0,0,0)),p.TracePipeline.Depth[0]);
+                    sheet.properties.SetTexture("_Test",Texture(hits));sheet.properties.SetMatrix("_InverseProjectionMatrix",inverse);sheet.properties.SetMatrix("_InverseViewMatrix",camera.cameraToWorldMatrix);
+                    RuntimeUtilities.BlitFullscreenTriangle(cb,scene,nativeTarget,sheet,1);
+                    p.Reconstruct(cb,camera,scene,camera.targetTexture,o);Execute(cb);
+                    var oracle=Read(nativeTarget).Select(v=>new Color(v.r*test.smith*.6f,v.g*test.smith*.6f,v.b*test.smith*.6f,.6f)).ToArray();
+                    double error=Error(Read(p.Resolved),oracle);
+                    Check(error<.002,"native installed fog resolve parity: distance="+test.eye+" density="+test.density+" stencil="+test.stencil+" Smith="+test.smith+" max="+error);
+                }
+                // The native shader has no sky classification. Compare its fog
+                // treatment at the same finite endpoint around FTFX's cloud source.
+                camera.transform.SetPositionAndRotation(Vector3.zero,Quaternion.identity);camera.ResetWorldToCameraMatrix();
+                var endUv=new Vector2(.5f,.75f);var endpoint=Position(endUv,160);
+                var skyColour=new Color(.8f,.6f,.2f,1);var map=Sized(Enumerable.Repeat(skyColour,8).ToArray(),4,2);
+                Shader.SetGlobalTexture("_SsrSkyReflMap",map);
+                var skyBase=Solid(new Color(.5f,.45f,.3f,1));
+                var skyRecords=new Color[count];var skyPoints=new Color[count];
+                for(int j=0;j<count;j++) {
+                    var start=Position(new Vector2((j%width+.5f)/width,(j/width+.5f)/height),2);var ray=endpoint-start;var direction=ray.normalized;
+                    skyRecords[j]=new Color(endUv.x,endUv.y,ray.magnitude,2);skyPoints[j]=new Color(direction.x,direction.y,direction.z,.98f);
+                }
+                var endClip=projection*new Vector4(endpoint.x,endpoint.y,endpoint.z,1);depths=Solid(new Color(endClip.z/endClip.w,0,0,0));
+                Globals(cb);TodGlobals(cb,.2f);var density=new Vector4(.05f,2,.025f,0);cb.SetGlobalVector("_Density",density);
+                cb.Blit(Texture(skyRecords),p.TracePipeline.Record);cb.Blit(Texture(skyPoints),p.TracePipeline.HitPoint);
+                cb.Blit(Solid(new Color(.6f,2,0,0)),p.TracePipeline.Hit);cb.Blit(Solid(new Color(0,0,0,1)),p.TracePipeline.Radiance);
+                sheet.properties.SetTexture("_Test",Texture(Enumerable.Repeat(new Color(endUv.x,endUv.y,.6f,1),count).ToArray()));sheet.properties.SetMatrix("_InverseViewMatrix",camera.cameraToWorldMatrix);
+                RuntimeUtilities.BlitFullscreenTriangle(cb,skyBase,nativeTarget,sheet,1);p.Reconstruct(cb,camera,scene,camera.targetTexture,o);Execute(cb);
+                var expectedSky=Read(nativeTarget).Select(v=>new Color(v.r*.6f,v.g*.6f,v.b*.6f,.6f)).ToArray();
+                double skyError=Error(Read(p.Resolved),expectedSky);Check(skyError<.002,"CloudSix confirmed sky retains clouds with native fog at measured endpoint max="+skyError);
+                var fogged=Read(p.Resolved);Globals(cb);TodGlobals(cb,.2f);cb.SetGlobalVector("_Density",density);cb.SetGlobalTexture("_StencilShadow",Solid(new Color(0,0,0,1)));
+                p.Reconstruct(cb,camera,scene,camera.targetTexture,o);Execute(cb);
+                Check(Error(fogged,Read(p.Resolved))>.005,"fog changes the cloud signal while stencil exclusion retains its existing blend");
+                // Missing sources stay unavailable; native forced misses never fog receiver colour.
+                Globals(cb);TodGlobals(cb,.2f);cb.SetGlobalVector("_Density",new Vector4(0,0,3,0));
+                cb.Blit(Solid(Color.clear),p.TracePipeline.Record);p.Reconstruct(cb,camera,scene,camera.targetTexture,o);Execute(cb);
+                Check(Read(p.Resolved).All(v=>v==Color.clear),"fog never creates measured radiance or coverage for unknown misses");
+                Check(Error(Read(p.ReceiverFallback.Radiance),Enumerable.Repeat(new Color(.2f,.3f,.4f,.7f),count).ToArray())<.001,"native forced-miss receiver fallback remains unchanged by dense fog");
+                EnsureFogCapture(cb,p,scene,density);
+            } finally {factory.Release();Shader.SetGlobalTexture("_SsrSkyReflMap",null);scene=oldScene;depths=oldDepth;camera.transform.SetPositionAndRotation(oldPosition,oldRotation);camera.worldToCameraMatrix=oldView;}
+        }
+    }
+    private static void EnsureFogCapture(CommandBuffer cb,SsrReflectionPipeline p,Texture source,Vector4 density) {
+        var t=new RenderTexture(1,1,0,RenderTextureFormat.ARGBFloat);t.Create();owned.Add(t);
+        cb.SetGlobalVector("_Density",density);p.CaptureReplayInput(cb,source,t,8);Execute(cb);
+        var v=Read(t)[0];Check(v.r==density.x && v.g==density.y && v.b==density.z && v.a==density.w,"fog parameter capture records GPU execution state");
     }
     private static void CloudProbeIntegration() {
         var map=new Texture2D(512,256,TextureFormat.RGBAFloat,false,true){filterMode=FilterMode.Bilinear,wrapModeU=TextureWrapMode.Repeat,wrapModeV=TextureWrapMode.Clamp};owned.Add(map);

@@ -32,6 +32,8 @@ Each needs `settings.txt` and `scene-source.exr`, `gbuffer0.exr`, `gbuffer1.exr`
 
 The CloudSix direction regression additionally requires `20261005-133533-123` with `settings.txt`, `scene-source.exr`, `trace-depth.exr` and `cloud-sky.exr`. It compares the GPU sky lookup against clouds actually displayed at independently reconstructed primary-camera directions. This catches swapped azimuth axes that a synthetic publisher/consumer round trip can miss.
 
+Fog fixtures execute the installed native SSR resolve as the GPU oracle across source distance, height falloff, density clamp/cap, stencil exclusion, camera rotation/translation and Smith amplitude. A CloudSix sky fixture compares the same fog treatment at its measured endpoint; missing coverage and forced-miss receiver radiance stay unchanged. Historical synthetic/capture parity excludes fog through stencil alpha to isolate the retained tracer/NRD/composition contract from this intentional resolve change. These controlled checks do not establish live raid appearance or GPU cost.
+
 ## Water reference and validation
 
 Use Python with UnityPy for reference extraction. The extraction verifies the installed water asset hash and writes local native shader oracles under `obj/WaterValidation`:

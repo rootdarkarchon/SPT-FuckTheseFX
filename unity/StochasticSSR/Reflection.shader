@@ -54,6 +54,7 @@ Shader "Hidden/FTFX/StochasticSSR/Reflection"
    return normalize(float3(-p.x,-p.y,-1));
   }
   float4 ReplayInput(V i):SV_Target {
+   if(_ReplayInput==8)return _Density;
    if(_ReplayInput==7) {
     float3 direction=CloudProbeDirection(i.p.xy);
     if(direction.y<=0)discard;
@@ -66,6 +67,7 @@ Shader "Hidden/FTFX/StochasticSSR/Reflection"
    if(_ReplayInput==4)return float4(_CameraMotionVectorsTexture.Load(p),0,0);
    if(_ReplayInput==5)return float4(_WaterCoverage.Load(p),0,0);
    if(_ReplayInput==6)return _CloudSky.Load(p);
+   if(_ReplayInput==9)return _StencilShadow.Load(p);
    return _MainTex.Load(p);
   }
   int2 TracePixel(V i) { return min((int2)i.p.xy,(int2)_Size.zw-1); }
@@ -142,9 +144,14 @@ Shader "Hidden/FTFX/StochasticSSR/Reflection"
    int2 p=TracePixel(i);float4 record=_Record.Load(int3(p,0));
    float c=_Guide.Load(int3(p,0)).x;
    if(c<=0 || record.w<=0)return 0;
-   float4 raw=_Raw.Load(int3(p,0));float3 radiance=raw.rgb*raw.a;
+   float4 raw=_Raw.Load(int3(p,0));
+   int2 receiver=Receiver(p);
+   float stencil=_StencilShadow.SampleLevel(sampler_StencilShadow,(receiver+.5)/_Size.xy,0).a;
+   float3 sourcePoint=_Point.Load(int3(p,0)).xyz;
+   float3 cameraToSource=mul((float3x3)SsrRasterMatrix(_CameraToWorld,8),sourcePoint);
+   float3 radiance;
    if(record.w==2) {
-    float3 direction=normalize(mul((float3x3)SsrRasterMatrix(_CameraToWorld,8),_Point.Load(int3(p,0)).xyz));
+    float3 direction=normalize(cameraToSource);
     float3 local=mul((float3x3)TOD_World2Sky,direction);
     if(!CloudSkyAvailable(direction) && (!TodAvailable() || dot(local,local)<1e-8))return 0;
     // Compatibility sky branch: native TOD is a bounded scattering blend,
@@ -152,8 +159,12 @@ Shader "Hidden/FTFX/StochasticSSR/Reflection"
     // blend is 0.5. Retain the native receiver signal as the other half; apply
     // Smith only to the sampled sky, never to the retained receiver component.
     // This is an explicit extension, not a claim that native SSR resolves sky.
-    radiance=SkyRadiance(Receiver(p),direction,raw.a);
-   }
+    // Sky is an FTFX extension. Its measured far-plane endpoint supplies the
+    // source distance; the published cloud lookup and bounded blend remain.
+    float3 endpoint=ViewPosition((receiver+.5)/_Size.xy,_Guide.Load(int3(p,0)).y)+sourcePoint*record.z;
+    cameraToSource=mul((float3x3)SsrRasterMatrix(_CameraToWorld,8),endpoint);
+    radiance=TodReflectionFog(SkyRadiance(receiver,direction,raw.a),cameraToSource,raw.a,stencil);
+   } else radiance=TodReflectionFog(raw.rgb,cameraToSource,1,stencil)*raw.a;
    // Smith visibility is estimator amplitude, never hit confidence.
    return float4(radiance*c,c);
   }

@@ -15,7 +15,7 @@ namespace FuckTheseFX.Source.StochasticSSR
         private readonly ComputeShader gaussian;
         internal string LastResetReason {get;private set;}="initial";
         internal RenderTexture Resolved;
-        private RenderTexture coverageCapture,haloCapture,fallbackCapture,gapCapture,skyCapture,probeCapture;
+        private RenderTexture coverageCapture,haloCapture,fallbackCapture,gapCapture,skyCapture,probeCapture,fogCapture,stencilCapture;
         private readonly SsrSkySource skySource=new SsrSkySource();
         private int previousSky,previousSkyWidth,previousSkyHeight;
         private readonly RenderTexture[] replayInputs=new RenderTexture[6];
@@ -152,6 +152,8 @@ namespace FuckTheseFX.Source.StochasticSSR
                 NativeReconstruction.Dispose();NativeReconstruction=null;
             }
             if(continuationCapture.Wants(o.CaptureContinuation || o.CaptureTraversal)) {
+                EnsureCapture(ref fogCapture,1,1);CaptureReplayInput(cb,source,fogCapture,8);
+                EnsureCapture(ref stencilCapture,p.CameraWidth,p.CameraHeight);CaptureReplayInput(cb,source,stencilCapture,9);
                 for(int k=0;k<replayInputs.Length;k++) {
                     EnsureCapture(ref replayInputs[k],p.CameraWidth,p.CameraHeight);
                     CaptureReplayInput(cb,source,replayInputs[k],k);
@@ -183,17 +185,19 @@ namespace FuckTheseFX.Source.StochasticSSR
                 targets.Add("nrd-normal-roughness",Nrd.Normal);targets.Add("nrd-receiver-hit-distance-eligibility",Nrd.Receiver);
                 targets.Add("nrd-motion",Nrd.Motion);targets.Add("nrd-display",Nrd.Output);
                 targets.Add("environment-probe",probeCapture);targets.Add("receiver-radiance",ReceiverFallback.Radiance);
+                targets.Add("fog-parameters",fogCapture);targets.Add("stencil-shadow",stencilCapture);
                 string[] inputNames={"scene-source","gbuffer0","gbuffer1","gbuffer2","motion","water"};
                 for(int k=0;k<replayInputs.Length;k++)targets.Add(inputNames[k],replayInputs[k]);
                 if(sky!=null)targets.Add("cloud-sky",skyCapture);
                 string metadata="Denoiser=NRD_REBLUR_SPECULAR"+"\nDirection=Ggx\nDepthGapFill=ReceiverColourFallback\nSourceBlend=0\nRelaxReturn=True\nSkyAfterContinuation=True\nSkyRecoveryScope=AllEligible\nSpatial=False\nHitAware=False\nShallowFade=0\nTraceShape=Square\nReconstruction="+o.Reconstruction+
                     "\nSkyProvider="+(sky!=null?"CloudSixGlobal":"TOD")+"\nCloudSkyMapping=atan2(x,z)/(2pi)+0.5,sqrt(y); upper hemisphere; mip 0"+
+                    "\nReflectionFog=NativeTODResolve; camera-to-source; opacity cap 10; maximum blend 0.5\nFogParameters=GPU _Density: height falloff, camera height above zero level, density, unused"+
                     "\nProjection="+MatrixText(projection)+"\nCameraToWorld="+MatrixText(camera.cameraToWorldMatrix)+
                     "\nPreviousView="+MatrixText(previousView)+"\nPreviousProjection="+MatrixText(GL.GetGPUProjectionMatrix(previousProjection,false))+"\nHistoryValid="+UsedHistory+"\nLastResetReason="+LastResetReason;
                 var rasterSnapshot=p.Raster.Current;
                 continuationCapture.Request(cb,targets,o,p.CameraWidth,p.CameraHeight,metadata,
                     rasterSnapshot!=null?(Func<string>)(()=>rasterSnapshot.Metadata()):null);
-            } else if(!continuationCapture.Pending) {Drop(ref coverageCapture);Drop(ref haloCapture);Drop(ref fallbackCapture);Drop(ref gapCapture);Drop(ref skyCapture);Drop(ref probeCapture);for(int k=0;k<replayInputs.Length;k++)Drop(ref replayInputs[k]);}
+            } else if(!continuationCapture.Pending) {Drop(ref coverageCapture);Drop(ref haloCapture);Drop(ref fallbackCapture);Drop(ref gapCapture);Drop(ref skyCapture);Drop(ref probeCapture);Drop(ref fogCapture);Drop(ref stencilCapture);for(int k=0;k<replayInputs.Length;k++)Drop(ref replayInputs[k]);}
             valid=o.Temporal;
         }
         private void RequireNrd() {
@@ -226,6 +230,7 @@ namespace FuckTheseFX.Source.StochasticSSR
             Drop(ref coverageCapture);Drop(ref haloCapture);Drop(ref fallbackCapture);Drop(ref gapCapture);
             Drop(ref skyCapture);
             Drop(ref probeCapture);
+            Drop(ref fogCapture);Drop(ref stencilCapture);
             Drop(ref Resolved);
         }
         public void Dispose() {if(disposed)return;disposed=true;continuationCapture.Dispose();Release();RetireNrd();if(NativeReconstruction!=null)continuationCapture.ReleaseWhenComplete(NativeReconstruction.Dispose);NativeReconstruction=null;ReceiverFallback.Dispose();TracePipeline.Dispose();UnityEngine.Object.DestroyImmediate(material);UnityEngine.Object.DestroyImmediate(triangle);}

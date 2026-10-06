@@ -5,6 +5,7 @@ float3 TOD_LocalSunDirection,TOD_LocalMoonDirection,TOD_kBetaMie;
 float4 TOD_kSun,TOD_k4PI,TOD_kRadius,TOD_kScale;
 float TOD_Contrast,TOD_ScatteringBrightness,TOD_Fogginess,TOD_MoonHaloPower;
 float4x4 TOD_World2Sky;
+float4 _Density; // native TOD: height falloff, camera height above zero level, density
 float TodScale(float cosine)
 {
     float x=1-cosine;
@@ -46,4 +47,18 @@ float3 TodReflectedSky(float3 worldDirection)
     float3 local=mul((float3x3)TOD_World2Sky,worldDirection);
     // An absent TOD transform/model is not permission to invent sky radiance.
     return TodAvailable() && dot(local,local)>1e-8?TodAtmosphere(normalize(local),1):0;
+}
+float3 TodReflectionFog(float3 radiance,float3 cameraToSource,float visibility,float stencil)
+{
+    // Installed native SSR resolve (EFT 40743): this is camera-to-source,
+    // not a new integration along the receiver-to-hit reflection segment.
+    float distance=length(cameraToSource);
+    float mask=1-saturate(stencil*1.5);
+    if(!TodAvailable() || distance<=1e-6 || mask<=0)return radiance;
+    float height=1+max((cameraToSource.y+_Density.y)*_Density.x,0);
+    float amount=1-exp(-min(max(_Density.z,.001)*distance/height,10));
+    // Native scales the atmosphere integral by amount as well as the final
+    // half-strength blend. Moon/halo/ground terms keep their original scaling.
+    float3 scattering=max(TodAtmosphere(cameraToSource/distance,amount),0)*visibility;
+    return lerp(radiance,scattering,amount*mask*.5);
 }
