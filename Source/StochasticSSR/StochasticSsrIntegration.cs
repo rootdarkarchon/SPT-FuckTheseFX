@@ -19,6 +19,7 @@ namespace FuckTheseFX.Source.StochasticSSR
         private Harmony harmony;
         private WaterReflectionCapture waterCapture;
         private CloudSkyProbe cloudProbe;
+        private readonly SsrOpticState opticState=new SsrOpticState();
         private bool previousEnabled, suspended;
         private int frames;
         internal StochasticSsrIntegration(string path, SsrSettings settings) { this.path=path;this.settings=settings; }
@@ -43,33 +44,58 @@ namespace FuckTheseFX.Source.StochasticSSR
                 hooks=new SsrHooks(renderer,compute,blend,reflection,noise) {
                     Settings=()=>suspended?new Options {Mode=SsrMode.Native}:settings.Read(),
                     IsMainCamera=c=>CameraManager.Instance!=null && ReferenceEquals(CameraManager.Instance.Camera,c),
+                    IsOpticCamera=IsOpticCamera,
+                    CameraOptions=(c,o)=>{RefreshOpticState();return SsrCameraPolicy.Effective(o,IsOpticCamera(c),o.Optics && o.ReduceMainInOptics && !hooks.HasFailed(opticState.Camera) && opticState.ReduceMain(Time.unscaledTime));},
+                    CameraGeneration=c=>ReferenceEquals(c,opticState.Camera)?opticState.Generation:0,
                     Error=s=>Plugin.MyLog.LogError(s)
                 };
                 SsrHooks.Active=hooks;
                 try {
                     waterCapture=new WaterReflectionCapture(bundle.LoadAsset<Shader>("Assets/WaterCapture.shader")) {
                         Requested=()=>!suspended && settings.NeedsWaterCapture,
-                        IsMainCamera=hooks.IsMainCamera
+                        IsMainCamera=c=>hooks.IsMainCamera(c) || IsOpticCamera(c)
                     };
                 } catch(Exception error) {Plugin.MyLog.LogWarning("Water shoreline capture unavailable; ordinary SSSR retained. "+error);}
                 AmbientSurfaceCapture.Requested=()=>!suspended && settings.Enabled.Value && settings.SurfaceColourInfluence.Value>0;
                 AmbientSurfaceCapture.IsMainCamera=hooks.IsMainCamera;
+                AmbientSurfaceCapture.IsOpticCamera=IsOpticCamera;
+                try {AmbientSurfaceCapture.ConfigureOpticCapture(bundle.LoadAsset<Shader>("Assets/WaterCapture.shader"));}
+                catch(Exception error){Plugin.MyLog.LogWarning("Optic surface colour capture unavailable; untinted reflections retained. "+error);}
                 harmony=new Harmony(Plugin.Guid+".stochasticssr");
                 var render=AccessTools.Method(renderer,"Render");
                 if(render==null)throw new MissingMethodException("Native SSR render contract missing");
                 harmony.Patch(render,prefix:new HarmonyMethod(typeof(SsrHooks),nameof(SsrHooks.Before)),finalizer:new HarmonyMethod(typeof(SsrHooks),nameof(SsrHooks.After)));
                 try {
                     cloudProbe=new CloudSkyProbe(reflection,AccessTools.TypeByName("AmbientLight")) {
-                        Requested=()=>!suspended && settings.Enabled.Value
+                        Requested=()=>!suspended && settings.Enabled.Value && hooks.HasActiveRenderer(Time.frameCount)
                     };
                     harmony.Patch(cloudProbe.Target,prefix:new HarmonyMethod(typeof(CloudSkyProbe),nameof(CloudSkyProbe.Before)),
                         postfix:new HarmonyMethod(typeof(CloudSkyProbe),nameof(CloudSkyProbe.After)));
                     CloudSkyProbe.Active=cloudProbe;
                 } catch(Exception error) {cloudProbe?.Dispose();cloudProbe=null;Plugin.MyLog.LogWarning("CloudSix native sky probe compatibility unavailable. "+error);}
                 previousEnabled=settings.Enabled.Value;
-                Plugin.MyLog.LogInfo("Stochastic SSR ready: NRD-denoised reflections; optics and disabled SSR retain native behavior.");
+                Plugin.MyLog.LogInfo("Stochastic SSR ready: separate ordinary optic GGX/NRD; scoped main-camera resolution budget; vision optics and disabled SSR retain native behavior.");
             }
             catch { Dispose();throw; }
+        }
+        private void RefreshOpticState()
+        {
+            var manager=CameraManager.Instance?.OpticCameraManager;
+            var camera=manager?.Camera;var sight=manager?.CurrentOpticSight;var scope=sight!=null?sight.ScopeData:null;
+            var night=camera!=null?camera.GetComponent<BSG.CameraEffects.NightVision>():null;
+            var thermal=camera!=null?camera.GetComponent<ThermalVision>():null;
+            bool eligible=!suspended && settings.Enabled.Value && settings.Optics.Value && SsrCameraPolicy.EligibleOptic(
+                camera!=null,camera!=null && camera.isActiveAndEnabled,scope!=null,
+                scope!=null && scope.NightVisionData!=null && scope.NightVisionData.NightVision,
+                scope!=null && scope.ThermalVisionData!=null && scope.ThermalVisionData.ThermalVision,
+                night!=null && night.isActiveAndEnabled && night.On,thermal!=null && thermal.isActiveAndEnabled && thermal.On,
+                camera!=null && SsrPipeline.Supports(camera,camera.pixelWidth,camera.pixelHeight));
+            opticState.Observe(Time.frameCount,Time.unscaledTime,camera,sight!=null?sight.GetInstanceID():0,eligible);
+        }
+        private bool IsOpticCamera(Camera camera)
+        {
+            RefreshOpticState();
+            return !suspended && settings.Enabled.Value && settings.Optics.Value && opticState.Active && ReferenceEquals(camera,opticState.Camera);
         }
         private static void Verify(string file, string expected)
         {
@@ -82,10 +108,10 @@ namespace FuckTheseFX.Source.StochasticSSR
             if(hooks==null)return;
             AmbientSurfaceCapture.Prune();
             if(frames%300==0)waterCapture?.Prune();
-            if(previousEnabled!=settings.Enabled.Value){hooks.Suspend();previousEnabled=settings.Enabled.Value;}
+            if(previousEnabled!=settings.Enabled.Value){hooks.Suspend();opticState.Reset();previousEnabled=settings.Enabled.Value;}
             if(++frames%300==0)hooks.Prune();
         }
-        internal void Suspend() { suspended=true;hooks?.Suspend(); }
+        internal void Suspend() { suspended=true;hooks?.Suspend();opticState.Reset(); }
         internal void Resume() { suspended=false; }
         public void Dispose()
         {

@@ -4,10 +4,12 @@ Shader "Hidden/FTFX/StochasticSSR/WaterCapture"
   HLSLINCLUDE
   #include "UnityCG.cginc"
   Texture2D<float> _WaterSourceDepth,_WaterBottom;
+  Texture2D<float4> _CameraGBufferTexture0;
   float _FTFXWaterBottomCaptured;
   struct V {float4 p:SV_POSITION;float3 world:TEXCOORD0;float eye:TEXCOORD1;};
   V CopyVertex(float4 p:POSITION){V o;o.p=float4(p.xy,0,1);o.world=0;o.eye=0;return o;}
   float CopyDepth(V i):SV_Target {if(_FTFXWaterBottomCaptured>.5)discard;return LinearEyeDepth(_WaterSourceDepth.Load(int3((int2)i.p.xy,0)));}
+  float4 CopySurface(V i):SV_Target {return float4(_CameraGBufferTexture0.Load(int3((int2)i.p.xy,0)).rgb,1);}
   V WaterVertex(float4 p:POSITION){V o;o.p=UnityObjectToClipPos(p);o.world=mul(unity_ObjectToWorld,p).xyz;o.eye=-mul(UNITY_MATRIX_V,float4(o.world,1)).z;return o;}
   float4 Capture(V i):SV_Target {
    float bottom=_WaterBottom.Load(int3((int2)i.p.xy,0));
@@ -33,6 +35,14 @@ Shader "Hidden/FTFX/StochasticSSR/WaterCapture"
    #pragma target 5.0
    #pragma vertex WaterVertex
    #pragma fragment Capture
+   ENDHLSL
+  }
+  Pass {
+   ZTest Always ZWrite Off Cull Off Blend Off
+   HLSLPROGRAM
+   #pragma target 5.0
+   #pragma vertex CopyVertex
+   #pragma fragment CopySurface
    ENDHLSL
   }
  }

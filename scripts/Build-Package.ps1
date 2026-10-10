@@ -1,5 +1,8 @@
 [CmdletBinding()]
-param([string]$SptInstallPath = 'D:\Tarkov-SPT-4.1')
+param(
+    [string]$SptInstallPath = 'D:\Tarkov-SPT-4.1',
+    [switch]$SkipVerification
+)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 function Get-WorkingTreeHash([string]$RepositoryRoot) {
@@ -32,6 +35,7 @@ if ($gitHead -notmatch '^[0-9a-f]{40}$') { throw 'Cannot resolve Git provenance 
 $assets = @('distantshadows','occlusion','stochasticssr','water')
 & dotnet build (Join-Path $repo 'FuckTheseFX.csproj') -c Release "-p:SptInstallPath=$SptInstallPath" --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
+if (-not $SkipVerification) {
 & (Join-Path $PSScriptRoot 'Test-Configuration.ps1') -SptInstallPath $SptInstallPath
 & (Join-Path $PSScriptRoot 'Test-OcclusionContracts.ps1') -SptInstallPath $SptInstallPath
 & (Join-Path $PSScriptRoot 'Test-ColorBleedContracts.ps1') -SptInstallPath $SptInstallPath
@@ -42,11 +46,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
 & (Join-Path $PSScriptRoot 'Test-GlassCullingContracts.ps1') -SptInstallPath $SptInstallPath
 & (Join-Path $PSScriptRoot 'Test-StochasticSsrContracts.ps1') -SptInstallPath $SptInstallPath
 & (Join-Path $PSScriptRoot 'Test-WaterContracts.ps1') -SptInstallPath $SptInstallPath
+}
 Add-Type -Path (Join-Path $SptInstallPath 'BepInEx\core\Mono.Cecil.dll')
 $built = Join-Path $repo 'bin\Release\netstandard2.1\FuckTheseFX.dll'
 $assembly = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($built)
 try {
     $version = $assembly.Name.Version.ToString(3)
+    if (-not $SkipVerification) {
     $plugin = $assembly.MainModule.Types | Where-Object FullName -eq 'FuckTheseFX.Plugin'
     $attribute = $plugin.CustomAttributes | Where-Object { $_.AttributeType.FullName -eq 'BepInEx.BepInPlugin' }
     if ($attribute.ConstructorArguments[0].Value -ne 'com.rootdarkarchon.fuckthesefx' -or $attribute.ConstructorArguments[2].Value -ne $version) { throw 'Plugin identity/version mismatch' }
@@ -66,6 +72,7 @@ try {
         }
     } }
     Write-Output 'Verified plugin GUID, version, all FX hooks and independence from AO Replacer.'
+    }
 } finally { $assembly.Dispose() }
 $expected = @{
     'BepInEx/plugins/FuckTheseFX/FuckTheseFX.dll' = $built
@@ -81,6 +88,7 @@ $expected['BepInEx/plugins/FuckTheseFX/Assets/nrdssr'] = Join-Path $repo 'Assets
 $expected['BepInEx/plugins/FuckTheseFX/Licenses/NRD.txt'] = Join-Path $repo 'native/NRD/vendor/NRD/LICENSE.txt'
 $expected['BepInEx/plugins/FuckTheseFX/Licenses/NRD-MathLib.txt'] = Join-Path $repo 'obj/NRD/upstream/_deps/mathlib-src/LICENSE.txt'
 $expected['BepInEx/plugins/FuckTheseFX/Licenses/NRD-ShaderMakeBlob.txt'] = Join-Path $repo 'obj/NRD/upstream/_deps/shadermake-src/LICENSE.txt'
+if (-not $SkipVerification) {
 $receipt = Get-Item (Join-Path $repo 'obj/NrdStandardValidation/validation.txt')
 foreach ($file in @('obj/NRD/bridge/Release/FTFXNrd.dll','Source/StochasticSSR/NrdSpecularBackend.cs','unity/StochasticSSR/NrdInputs.shader','unity/StochasticSsrValidation/NrdStandardValidation.cs')) {
     if ((Get-Item (Join-Path $repo $file)).LastWriteTimeUtc -gt $receipt.LastWriteTimeUtc) { throw "NRD validation is stale: $file" }
@@ -104,6 +112,8 @@ $allowedEntries += @('FTFXNrd.dll','Assets/nrdssr','Licenses/NRD.txt','Licenses/
 foreach ($entry in $expected.Keys) {
     if ($entry -notin $allowedEntries) { throw "Non-runtime file prohibited in FTFX package: $entry" }
 }
+}
+# Required package identity guards also apply when optional verification is skipped.
 if ((Get-WorkingTreeHash $repo) -ne $workingTreeHash) { throw 'Working tree changed during build; rebuild before packaging' }
 $zip = Join-Path $repo "bin\Release\FuckTheseFX-$version-SPT4.1-$workingTreeHash.zip"
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -115,6 +125,7 @@ try {
         [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $expected[$name], $name, [IO.Compression.CompressionLevel]::Optimal) | Out-Null
     }
 } finally { $archive.Dispose(); $file.Dispose() }
+if (-not $SkipVerification) {
 $archive = [IO.Compression.ZipFile]::OpenRead($zip)
 try {
     if ($archive.Entries.Count -ne $expected.Count) { throw 'Unexpected ZIP contents.' }
@@ -127,9 +138,16 @@ try {
     }
     Write-Output "Verified all $($archive.Entries.Count) package entries and hashes."
 } finally { $archive.Dispose() }
+}
 if ((Get-WorkingTreeHash $repo) -ne $workingTreeHash) { throw 'Working tree changed during ZIP creation; rebuild before packaging' }
-Get-FileHash -LiteralPath $zip -Algorithm SHA256
-
-
-
-@{version=$version;gitHead=$gitHead;workingTreeHash=$workingTreeHash;zipSha256=(Get-FileHash -LiteralPath $zip).Hash;sscgiAcceptance='APPROVED by user on 2026-10-04 following in-game visual review and GPU on/off comparisons';releaseAcceptance='SSCGI approved; local package and runtime contract checks passed'} | ConvertTo-Json | Set-Content ($zip+'.receipt.json')
+$zipHash = $null
+if ($SkipVerification) {
+    $releaseAcceptance = 'Verification and tests skipped at user request'
+    Write-Output $releaseAcceptance
+} else {
+    $zipHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+    $releaseAcceptance = 'SSCGI approved; local package and runtime contract checks passed'
+    Write-Output $zipHash
+}
+@{version=$version;gitHead=$gitHead;workingTreeHash=$workingTreeHash;zipSha256=$zipHash;verificationSkipped=[bool]$SkipVerification;sscgiAcceptance='APPROVED by user on 2026-10-04 following in-game visual review and GPU on/off comparisons';releaseAcceptance=$releaseAcceptance} | ConvertTo-Json | Set-Content ($zip+'.receipt.json')
+Write-Output "Package: $zip"

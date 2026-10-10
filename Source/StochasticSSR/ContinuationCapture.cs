@@ -32,7 +32,7 @@ namespace FuckTheseFX.Source.StochasticSSR
             armed=false;pending=true;
             var data=new Dictionary<string,Color[]>();var sizes=new Dictionary<string,Vector2Int>();
             int remaining=targets.Count;bool failed=false;
-            string metadata="Schema=7\nExcludedReceiver=miss_0 (shared with material/depth exclusion)\nRecordGeometryXY=integer camera source cell\n"+replayMetadata+Environment.NewLine+"Camera="+cameraWidth+"x"+cameraHeight+" frame="+Time.frameCount+Environment.NewLine+
+            string metadata="Schema=8\nExcludedReceiver=miss_0 (shared with material/depth exclusion)\nRecordGeometryXY=integer camera source cell\nEndpointSkyFallbackFlag=128 (inferred sky, not completed traversal)\n"+replayMetadata+Environment.NewLine+"Camera="+cameraWidth+"x"+cameraHeight+" frame="+Time.frameCount+Environment.NewLine+
                 string.Join(Environment.NewLine,typeof(Options).GetFields(System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).Select(f=>f.Name+"="+Convert.ToString(f.GetValue(o),CultureInfo.InvariantCulture)));
             foreach(var item in targets) {
                 string name=item.Key;sizes[name]=new Vector2Int(item.Value.width,item.Value.height);
@@ -88,7 +88,11 @@ namespace FuckTheseFX.Source.StochasticSSR
                 File.WriteAllText(Path.Combine(folder,"depth-hits.csv"),hitRows.ToString());
                 File.WriteAllLines(Path.Combine(folder,"depth-hit-summary.csv"),new[]{"metric,value","bracketed,"+bracketed,"thickness_only,"+thicknessOnly,"baseline_uv_crossed_cell,"+crossCell,"original_depth_confidence_deficit,"+depthLoss.ToString("R",CultureInfo.InvariantCulture)});
             }
-            File.WriteAllLines(Path.Combine(folder,"recovered-histograms.csv"),new[]{"metric,count","recovered,"+recovered,"recovered_positive_confidence,"+contributing,"limit_exhausted,"+limited,"sky_after_continuation,"+records.Select((v,i)=>v.a==2 && ((int)info[i].a&64)!=0).Count(v=>v),"direct_sky,"+records.Select((v,i)=>v.a==2 && ((int)info[i].a&64)==0).Count(v=>v)}.Concat(histogram.Select(v=>v.Key+","+v.Value)));
+            File.WriteAllLines(Path.Combine(folder,"recovered-histograms.csv"),new[]{"metric,count","recovered,"+recovered,"recovered_positive_confidence,"+contributing,"limit_exhausted,"+limited,
+                "unrecovered_limit_exhausted,"+records.Select((v,i)=>v.a!=2 && ((int)info[i].a&8)!=0).Count(v=>v),
+                "sky_after_continuation,"+records.Select((v,i)=>v.a==2 && ((int)info[i].a&64)!=0).Count(v=>v),
+                "endpoint_sky_fallback,"+records.Select((v,i)=>v.a==2 && ((int)info[i].a&128)!=0).Count(v=>v),
+                "direct_sky,"+records.Select((v,i)=>v.a==2 && ((int)info[i].a&(64|128))==0).Count(v=>v)}.Concat(histogram.Select(v=>v.Key+","+v.Value)));
 
 
             if(data.TryGetValue("scene-source",out var sceneInput)) {
@@ -105,9 +109,9 @@ namespace FuckTheseFX.Source.StochasticSSR
                 try {texture.SetPixels(item.Value);texture.Apply();File.WriteAllBytes(Path.Combine(folder,item.Key+".exr"),texture.EncodeToEXR(Texture2D.EXRFlags.OutputAsFloat|Texture2D.EXRFlags.CompressZIP));}
                 finally {UnityEngine.Object.DestroyImmediate(texture);}
             }
-            File.WriteAllText(Path.Combine(folder,"COMPLETE.txt"),"Schema 6: camera-to-receiver radial eligibility; reason 7 retired. One command-ordered frame. Optional traversal-work/topology replace sample-direction-pdf/depth-hit; see traversal-README.txt. Geometry record XY are exact integer camera source cells; sky XY are UV. Flags: 1 depth, 2 facing, 4 recovered, 8 continuation limit, 64 completed-continuation sky. Coverage-stage RGB: raw, measured resolved/temporal, final reconstructed coverage. gap-fill-coverage RGB: pre-reconstruction measured coverage, additional display coverage (filtering only; no rejected-source fill), remaining fallback. filtered contains the NRD estimate; rejected-source colour filling is disabled; no custom temporal histories are retained. depth-hit RGBA: accepted-hit flags (1 bracketed, 2 thickness-only, 4 tested-cell/source-UV mismatch), original depth confidence, normal confidence, edge confidence. Reflection RGB is premultiplied by coverage; EXRs are linear data. Trace depth is camera eye metres at camera extent (ceil-reduced hierarchy). sample-direction-pdf XYZ is the original view ray; W is the GGX VNDF PDF, zero for perfect mirrors. Baked behavior and live options are recorded in settings.txt. No rolling temporal metadata or display-estimate history is recorded.");
+            File.WriteAllText(Path.Combine(folder,"COMPLETE.txt"),"Schema 8: no receiver-range gate; reason 7 retired. One command-ordered frame. Optional traversal-work/topology replace sample-direction-pdf/depth-hit; see traversal-README.txt. Geometry record XY are exact integer camera source cells; sky XY are UV. Flags: 1 depth, 2 facing, 4 recovered, 8 continuation limit, 64 completed-continuation sky, 128 endpoint-validated sky fallback (inference after failed foreground continuation). Sky record kind 2 includes inference; flag 128 distinguishes it from completed/direct sky. limit_exhausted includes attempted allowance failures even if endpoint sky fallback succeeds; unrecovered_limit_exhausted excludes sky recovery. Coverage-stage RGB: raw, resolved/denoised, final reconstructed coverage; all can include flagged endpoint sky inference. gap-fill-coverage RGB: pre-reconstruction measured coverage, additional display coverage (filtering only; no rejected-source fill), remaining fallback. filtered contains the NRD estimate; rejected-source colour filling is disabled; no custom temporal histories are retained. depth-hit RGBA: accepted-hit flags (1 bracketed, 2 thickness-only, 4 tested-cell/source-UV mismatch), original depth confidence, normal confidence, edge confidence. Reflection RGB is premultiplied by coverage; EXRs are linear data. Trace depth is camera eye metres at camera extent (ceil-reduced hierarchy). sample-direction-pdf XYZ is the original view ray; W is the GGX VNDF PDF, zero for perfect mirrors. Baked behavior and live options are recorded in settings.txt. No rolling temporal metadata or display-estimate history is recorded.");
         }
-        private static string Termination(Color record)=>record.a==1?"geometry":record.a==2?"sky":"miss_"+((int)record.b).ToString(CultureInfo.InvariantCulture);
+        private static string Termination(Color record,Color continuation)=>record.a==1?"geometry":record.a==2?(((int)continuation.a&128)!=0?"sky_endpoint_fallback":"sky"):"miss_"+((int)record.b).ToString(CultureInfo.InvariantCulture);
         internal static void SaveTraversal(string folder,Color[] work,Color[] topology,Color[] records,Color[] continuation,int width)
         {
             long total=work.Sum(v=>(long)v.r),continuationWork=work.Sum(v=>(long)v.g);
@@ -116,7 +120,7 @@ namespace FuckTheseFX.Source.StochasticSSR
             using(var writer=new StreamWriter(Path.Combine(folder,"traversal-rays.csv"))) {
                 writer.WriteLine("x,y,termination,eligible,iterations,after_first_continuation,descents,mip0_visits,visited_mip_mask,repeated_fine_cell_visits,rejection_attempts,continued_samples,continued_pixels,max_depth_separation,flags");
                 for(int i=0;i<work.Length;i++) {
-                    string reason=Termination(records[i]);int count=(int)work[i].r;
+                    string reason=Termination(records[i],continuation[i]);int count=(int)work[i].r;
                     if(!groups.TryGetValue(reason,out var counts)){counts=new List<int>();groups.Add(reason,counts);continuationSums.Add(reason,0);}
                     counts.Add(count);continuationSums[reason]+=(long)work[i].g;
                     string key=reason+","+count;histogram.TryGetValue(key,out int n);histogram[key]=n+1;
@@ -135,7 +139,7 @@ namespace FuckTheseFX.Source.StochasticSSR
             File.WriteAllLines(Path.Combine(folder,"traversal-summary.csv"),summary);
             File.WriteAllLines(Path.Combine(folder,"traversal-histogram.csv"),new[]{"termination,iterations,rays"}.Concat(histogram.Select(v=>v.Key+","+v.Value)));
             File.WriteAllLines(Path.Combine(folder,"traversal-mips.csv"),new[]{"mip,rays_visiting"}.Concat(levelRays.Select((v,i)=>i+","+v)));
-            File.WriteAllText(Path.Combine(folder,"traversal-README.txt"),"Work RGBA: executed loop bodies, loop bodies after an earlier continuation rejection, descents, valid eligible receiver. Topology RGBA: mip-zero visits, visited-mip bit mask, repeated consecutive fine-cell visits, rejection attempts. Counts include misses and budget exhaustion; excluded/invalid receivers retain zero work. Repeated fine-cell visits are a cell-revisit proxy, not wave occupancy. Mip masks report visits, not per-level iteration counts. Join final trace-record/trace-cost for recovered geometry, completed sky and stop reasons. Diagnostic shader replaces ray/PDF and depth-hit outputs, increases register pressure, and must not certify speedups. Total iterations="+total+"; after-first-continuation="+continuationWork+".\n");
+            File.WriteAllText(Path.Combine(folder,"traversal-README.txt"),"Work RGBA: executed loop bodies, loop bodies after an earlier continuation rejection, descents, valid eligible receiver. Topology RGBA: mip-zero visits, visited-mip bit mask, repeated consecutive fine-cell visits, rejection attempts. Counts include misses and budget exhaustion; excluded/invalid receivers retain zero work. Repeated fine-cell visits are a cell-revisit proxy, not wave occupancy. Mip masks report visits, not per-level iteration counts. Join final trace-record/trace-cost for recovered geometry, completed sky and stop reasons. sky_endpoint_fallback identifies inferred sky (flag 128), separately from direct/completed sky; allowance flag 8 is retained when inference follows an allowance stop. Diagnostic shader replaces ray/PDF and depth-hit outputs, increases register pressure, and must not certify speedups. Total iterations="+total+"; after-first-continuation="+continuationWork+".\n");
         }
         public void Dispose(){disposed=true;}
     }

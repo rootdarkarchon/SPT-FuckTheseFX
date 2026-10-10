@@ -641,6 +641,36 @@
   },
   {
     "section": "4. Stochastic GGX SSR",
+    "key": "Optic SSR enabled",
+    "default": "True",
+    "type": "Boolean",
+    "advanced": false,
+    "min": null,
+    "max": null,
+    "list": null
+  },
+  {
+    "section": "4. Stochastic GGX SSR",
+    "key": "Optic SSR resolution",
+    "default": "R512",
+    "type": "OpticReflectionResolution",
+    "advanced": true,
+    "min": null,
+    "max": null,
+    "list": null
+  },
+  {
+    "section": "4. Stochastic GGX SSR",
+    "key": "Reduce main SSR in optics",
+    "default": "True",
+    "type": "Boolean",
+    "advanced": true,
+    "min": null,
+    "max": null,
+    "list": null
+  },
+  {
+    "section": "4. Stochastic GGX SSR",
     "key": "Maximum iterations",
     "default": "350",
     "type": "Int32",
@@ -701,6 +731,16 @@
   },
   {
     "section": "4. Stochastic GGX SSR",
+    "key": "Endpoint-validated sky fallback",
+    "default": "True",
+    "type": "Boolean",
+    "advanced": true,
+    "min": null,
+    "max": null,
+    "list": null
+  },
+  {
+    "section": "4. Stochastic GGX SSR",
     "key": "Capture continuation diagnostics",
     "default": "False",
     "type": "Boolean",
@@ -723,6 +763,16 @@
     "section": "4. Stochastic GGX SSR",
     "key": "Fallback strength (%)",
     "default": "65",
+    "type": "Int32",
+    "advanced": true,
+    "min": "0",
+    "max": "100",
+    "list": null
+  },
+  {
+    "section": "4. Stochastic GGX SSR",
+    "key": "CloudSix fallback strength (%)",
+    "default": "100",
     "type": "Int32",
     "advanced": true,
     "min": "0",

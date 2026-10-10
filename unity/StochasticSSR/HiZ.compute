@@ -29,6 +29,7 @@ float4 _Size,_Trace,_Clip;
 float _EdgePixels;
 int _Frame;
 float _ThicknessConfidenceFloor;
+int _EndpointSkyFallback;
 float4 _Continuation; // total skipped cells, major-axis camera pixels, eye-depth gap, unused
 #include "AMD/Sampling.hlsl"
 #if defined(FTFX_TRACE_DIAGNOSTICS)
@@ -111,7 +112,8 @@ void TraceReason(uint2 pixel,float reason,float kind,float4 stats)
 // Diagnostics record attempted cost on failure, consumed cost on recovery.
 // Flags: 1 foreground depth, 2 facing, 4 recovered, 8 allowance exhausted,
 // 16 accepted low-facing confidence-only hit, 32 initial self-contact candidate,
-// 64 sky after completed bounded continuation (not recovered geometry).
+// 64 sky after completed bounded continuation (not recovered geometry),
+// 128 endpoint-validated sky fallback after failed foreground continuation.
 // The first rejection is retained. Bit 32 never changes trace acceptance.
 bool ContinueRejected(uint2 pixel,float2 uv,float rayDepth,float surface,float span,int cause,inout float4 stats)
 {
@@ -363,20 +365,30 @@ void FinalizeContinuedSky(uint3 id:SV_DispatchThreadID)
 {
     if(any(id.xy>=(uint2)_Size.zw))return;
     float4 record=_RecordOutput[id.xy],stats=_TraceInfo[id.xy];
-    if(record.w!=0 || record.z!=10 || stats.x<=0 || _Continuation.x<=0 ||
-       ((int)stats.w&8)!=0 || stats.x>_Continuation.x || stats.y>_Continuation.y || stats.z>_Continuation.z)return;
+    if(record.w!=0 || stats.x<=0 || _Continuation.x<=0)return;
+    bool completed=record.z==10 && ((int)stats.w&8)==0 &&
+        stats.x<=_Continuation.x && stats.y<=_Continuation.y && stats.z<=_Continuation.z;
+    bool fallback=_EndpointSkyFallback!=0 && ((int)stats.w&1)!=0 &&
+        (record.z==8 || (record.z==11 && ((int)stats.w&8)!=0));
+    if(!completed && !fallback)return;
     LoadRasterMatrices();
     int2 pixel=min((int2)((id.xy+.5)*_Size.xy/_Size.zw),(int2)_Size.xy-1);
-    // The broader scope changes receiver eligibility only. Failed/budgeted
-    // rays cannot reach this kernel's completed reason-10 recovery path.
+    // Misses retain the original GGX direction. Accepted geometry is untouched.
     float4 guide=_HitOutput[id.xy],rayData=_PointOutput[id.xy];
     float3 start=Position((pixel+.5)/_Size.xy,.5);start*=guide.y/(-start.z);
     float3 direction=rayData.xyz;
     if(direction.z>=0 || !all(isfinite(direction)))return;
+    if(fallback && (!all(isfinite(stats)) || !all(isfinite(start)) ||
+       guide.y<=_Clip.x || guide.y>=_Clip.y*.999 ||
+       mul(transpose((float3x3)rasterView),direction).y<=0))return;
     float distance=(-_Clip.y-start.z)/direction.z;
     float2 endpoint=Project(start+direction*distance);
+    if(fallback && (!isfinite(distance) || !all(isfinite(endpoint))))return;
     if(distance<=.05 || any(endpoint<=0) || any(endpoint>=1) ||
        _HiZ0.Load(int3((int2)(endpoint*_Size.xy),0))<_Clip.y*.999)return;
+    // Endpoint evidence does not prove the hidden interval is clear. This
+    // opt-in inference spends no additional traversal budget or render pass.
+    if(fallback && !isfinite(_HiZ0.Load(int3((int2)(endpoint*_Size.xy),0))))return;
     float visibility=1;
     if(rayData.w<1) {
         float3 traceNormal=_Normals.Load(int3(pixel,0)).xyz*2-1;
@@ -392,5 +404,5 @@ void FinalizeContinuedSky(uint3 id:SV_DispatchThreadID)
     _HitOutput[id.xy]=guide;
     _RadianceOutput[id.xy]=float4(0,0,0,visibility);
     _RecordOutput[id.xy]=float4(endpoint,distance,2);
-    stats.w=(int)stats.w|64;_TraceInfo[id.xy]=stats;
+    stats.w=(int)stats.w|(fallback?128:64);_TraceInfo[id.xy]=stats;
 }

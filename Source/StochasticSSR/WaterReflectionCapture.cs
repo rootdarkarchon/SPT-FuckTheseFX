@@ -22,7 +22,7 @@ namespace FuckTheseFX.Source.StochasticSSR
         private readonly Dictionary<Camera,Entry> entries=new Dictionary<Camera,Entry>();
         private readonly ConditionalWeakTable<CommandBuffer,Binding> bindings=new ConditionalWeakTable<CommandBuffer,Binding>();
         private readonly List<WeakReference> recorded=new List<WeakReference>();
-        private bool failed;
+        private readonly HashSet<Camera> failed=new HashSet<Camera>();
         private sealed class Binding { internal RenderTargetIdentifier[] Targets;internal RenderTargetIdentifier Depth; }
         private sealed class Entry : IDisposable
         {
@@ -97,13 +97,13 @@ namespace FuckTheseFX.Source.StochasticSSR
         }
         private static bool SupportedMaterial(Material m)=>m!=null && m.shader!=null &&
             (m.shader.name=="Hidden/WaterForSSRv2" || m.shader.name=="Hidden/FTFX/WaterParity");
-        private bool Enabled(Camera c)=>!failed && Requested?.Invoke()==true && c!=null && IsMainCamera?.Invoke(c)==true &&
+        private bool Enabled(Camera c)=>c!=null && !failed.Contains(c) && Requested?.Invoke()==true && IsMainCamera?.Invoke(c)==true &&
             SsrPipeline.Supports(c,c.pixelWidth,c.pixelHeight) && SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RGFloat);
         private void BeforeCamera(Camera c)
         {
             if(!entries.TryGetValue(c,out var e))return;
             if(!Enabled(c)){e.Capture.Clear();return;}
-            try {Prepare(c);}catch(Exception error){Fail(error);}
+            try {Prepare(c);}catch(Exception error){Fail(c,error);}
         }
         private static RenderTexture Target(string name,int w,int h,RenderTextureFormat format)
         {
@@ -142,7 +142,7 @@ namespace FuckTheseFX.Source.StochasticSSR
                 cb.SetGlobalTexture("_WaterSourceDepth",BuiltinRenderTextureType.ResolvedDepth);
                 cb.SetRenderTarget(e.Bottom);cb.DrawMesh(triangle,Matrix4x4.identity,material,0,0);
                 cb.SetGlobalFloat("_FTFXWaterBottomCaptured",1);
-            }catch(Exception error){Fail(error);}
+            }catch(Exception error){Fail(camera,error);}
         }
         private void Record(CommandBuffer cb,Mesh mesh,Matrix4x4 matrix,int submesh,Camera camera)
         {
@@ -153,10 +153,14 @@ namespace FuckTheseFX.Source.StochasticSSR
                 var block=new MaterialPropertyBlock();block.SetTexture("_WaterBottom",e.Bottom);
                 cb.SetRenderTarget(e.Mask,b.Depth);
                 cb.DrawMesh(mesh,matrix,material,submesh,1,block);
-            }catch(Exception error){Fail(error);}
+            }catch(Exception error){Fail(camera,error);}
             finally{cb.SetRenderTarget(b.Targets,b.Depth);}
         }
-        private void Fail(Exception error){failed=true;Plugin.MyLog.LogWarning("Water reflection capture unavailable; ordinary SSSR retained. "+error);}
+        private void Fail(Camera camera,Exception error){
+            if(camera==null || !failed.Add(camera))return;
+            if(entries.TryGetValue(camera,out var entry))entry.Capture.Clear();
+            Plugin.MyLog.LogWarning("Water reflection capture unavailable for "+camera.name+"; ordinary SSSR retained. "+error);
+        }
         internal static RenderTexture Get(Camera c,int w,int h)
         {
             var a=Active;
@@ -166,12 +170,13 @@ namespace FuckTheseFX.Source.StochasticSSR
             // before SSR. Bind a stable resource now, including on the first
             // frame; CPU producer timestamps cannot establish GPU freshness.
             // The per-render AfterGBuffer clear prevents stale/no-water coverage.
-            try {return a.Prepare(c).Mask;}catch(Exception error){a.Fail(error);return null;}
+            try {return a.Prepare(c).Mask;}catch(Exception error){a.Fail(c,error);return null;}
         }
         internal void Prune()
         {
             foreach(var c in entries.Keys.Where(c=>c==null).ToArray()){entries[c].Dispose();entries.Remove(c);}
             recorded.RemoveAll(w=>!w.IsAlive);
+            failed.RemoveWhere(c=>c==null);
         }
         public void Dispose()
         {
@@ -179,7 +184,7 @@ namespace FuckTheseFX.Source.StochasticSSR
             // Native pre-cull rebuilds these buffers. Detach our recorded resource
             // references before releasing them, including when no owner remains.
             foreach(var w in recorded)if(w.Target is CommandBuffer cb)try{cb.Clear();}catch{}
-            recorded.Clear();foreach(var e in entries.Values)e.Dispose();entries.Clear();
+            recorded.Clear();foreach(var e in entries.Values)e.Dispose();entries.Clear();failed.Clear();
             if(material!=null)UnityEngine.Object.DestroyImmediate(material);if(triangle!=null)UnityEngine.Object.DestroyImmediate(triangle);
         }
     }

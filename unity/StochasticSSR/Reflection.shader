@@ -317,7 +317,8 @@ Shader "Hidden/FTFX/StochasticSSR/Reflection"
    float4 traceInfo=_TraceInfo.Load(int3(p,0));int traceFlags=(int)traceInfo.w;
    if(_ReflectionOptions.y==30) {
     float3 c=0;
-    if((traceFlags&64)!=0)c=float3(0,1,1); // sky after completed continuation
+    if((traceFlags&128)!=0)c=float3(1,.6,0); // endpoint-validated sky fallback
+    else if((traceFlags&64)!=0)c=float3(0,1,1); // sky after completed continuation
     else if((traceFlags&4)!=0)c=(traceFlags&3)==3?float3(1,1,1):(traceFlags&2)!=0?float3(1,0,1):float3(0,1,0);
     else if((traceFlags&8)!=0)c=float3(1,0,0);
     else if((traceFlags&3)!=0)c=float3(1,1,0);

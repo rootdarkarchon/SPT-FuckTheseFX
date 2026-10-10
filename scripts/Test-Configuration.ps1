@@ -18,7 +18,7 @@ $null = $bind.Invoke($null, $bindArgs)
 $catalog = $plugin.GetField('Settings', $flags).GetValue($null)
 $entries = @($catalog.GetType().GetProperty('Settings', $flags).GetValue($catalog))
 $expected = Get-Content (Join-Path $PSScriptRoot 'ConfigurationExpectations.json') -Raw | ConvertFrom-Json
-if ($config.Count -ne 99 -or $entries.Count -ne 98 -or $expected.Count -ne 98) { throw 'Expected 98 real settings plus one UI row' }
+if ($config.Count -ne 104 -or $entries.Count -ne 103 -or $expected.Count -ne 103) { throw 'Expected 103 real settings plus one UI row' }
 function Entry($section, $key) { $config[[BepInEx.Configuration.ConfigDefinition]::new($section, $key)] }
 function Tag($entry, $name) { $entry.Description.Tags[0].GetType().GetField($name).GetValue($entry.Description.Tags[0]) }
 foreach ($spec in $expected) {
@@ -94,6 +94,11 @@ foreach ($spec in $expected | Where-Object key -like '* (%)') {
 (Entry '4. Stochastic GGX SSR' 'Minimum receiver smoothness (%)').BoxedValue=40
 Near (Field ($ssr.GetType().GetMethod('Read',$flags).Invoke($ssr,@())) 'ReceiverCutoff') .4
 if ((Field ($ssr.GetType().GetMethod('Read',$flags).Invoke($ssr,@())) 'HistoryFrames') -ne 8) { throw 'SSR history default did not reach runtime' }
+$endpointSky=Entry '4. Stochastic GGX SSR' 'Endpoint-validated sky fallback'
+if ($endpointSky.BoxedValue -ne $true -or (Field ($ssr.GetType().GetMethod('Read',$flags).Invoke($ssr,@())) 'EndpointSkyFallback') -ne $true) { throw 'Endpoint sky fallback must default on' }
+$endpointSky.BoxedValue=$false
+if ((Field ($ssr.GetType().GetMethod('Read',$flags).Invoke($ssr,@())) 'EndpointSkyFallback') -ne $false) { throw 'Endpoint sky fallback disable did not reach runtime' }
+$endpointSky.BoxedValue=$true
 function SetNonDefaultValues {
     foreach ($entry in $entries) {
         $range=$entry.Description.AcceptableValues
@@ -135,7 +140,9 @@ $highQuality=$vanillaPlus.Clone()
 foreach ($key in @('Additional Ambient Highlight','Sharpen Filter','Vintage Filter')) { $highQuality["1. Vanilla Optimizations/$key"]=$false }
 $highQuality['2. XeGTAO/Enabled']=$true
 $highQuality['4. Stochastic GGX SSR/Enabled']=$true
+$highQuality['4. Stochastic GGX SSR/Optic SSR enabled']=$false
 $highQualityPlus=$highQuality.Clone()
+$highQualityPlus['4. Stochastic GGX SSR/Optic SSR enabled']=$true
 $highQualityPlus['3. Screen Space Contact Global Illumination/Enabled']=$true
 $presets=@{ Vanilla=$vanilla; VanillaPlus=$vanillaPlus; HighQualityVisuals=$highQuality; HighQualityPlusVisuals=$highQualityPlus }
 $helpText=$catalog.GetType().GetField('PresetHelpText',$flags).GetRawConstantValue()
@@ -173,5 +180,5 @@ foreach ($savePolicy in @($false,$true)) {
     }
 }
 $bindArgs[0]=$config;$null=$bind.Invoke($null,$bindArgs)
-if ($config.Count -ne 99) { throw 'Repeated binding duplicated settings' }
-Write-Output 'Verified 98 settings, numerically ordered CM 18.4 groups, integer percentages, eight-frame SSR default, four preset labels/tooltips and help text, selective and Shift-reset presets, save policy and persistence.'
+if ($config.Count -ne 104) { throw 'Repeated binding duplicated settings' }
+Write-Output 'Verified 103 settings, numerically ordered CM 18.4 groups, integer percentages, eight-frame SSR default, default-on endpoint sky fallback, normal optic toggle, R512 optic default and preserved preset resolution, four preset labels/tooltips and help text, selective and Shift-reset presets, save policy and persistence.'

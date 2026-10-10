@@ -44,7 +44,7 @@ Settings apply live and save to `BepInEx/config/com.rootdarkarchon.fuckthesefx.c
 ## Using the replacement effects
 
 - **XeGTAO:** keep AO enabled in Tarkov's graphics settings. Setting game AO to Off also disables FTFX's AO and actor pass.
-- **FTFX reflections:** keep SSR enabled in Tarkov's graphics settings. The replacement runs on supported main cameras; optics retain native SSR.
+- **FTFX reflections:** keep SSR enabled in Tarkov's graphics settings. The normal Optic SSR enabled toggle controls separate GGX SSR and denoising in ordinary scopes, with R512 as the default scope resolution. An advanced toggle lowers main SSR one resolution step while scoped. Nightvision and thermal optics remain native. HQ Visuals leaves optic SSR off; HQ+ enables it. Presets preserve the scope resolution.
 - **SSCGI:** requires XeGTAO and a supported main HDR deferred camera. It can run with FTFX reflections off.
 - **Custom water:** select **Advanced Settings > 5. Custom Water > Mode > FTFX**. Native is the default; other maps keep their native water.
 - **Glass culling fix:** applies only to Streets of Tarkov.

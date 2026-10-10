@@ -30,6 +30,7 @@ try {
     if($types | Where-Object Name -in @('FidelityDenoiser','AmdReflectionDenoiser','ReflectionDenoiser','ReflectionDirection','ReflectionDepthGapFill')) { throw 'Retired native-signal denoiser remains in release' }
     if($types | Where-Object Namespace -match 'CleanupBaseline|PerformanceBaseline|TraceOptimizationBaseline|ContinuationOptimizationBaseline|HistoryCopyBaseline|HistoryOwnershipBaseline|PreNrdStandard') {throw 'Validation-only baseline leaked into release'}
     $options=$types | Where-Object { $_.Namespace -eq 'FuckTheseFX.Source.StochasticSSR' -and $_.Name -eq 'Options' }
+    if(-not ($options.Fields | Where-Object { $_.Name -eq 'EndpointSkyFallback' -and $_.FieldType.FullName -eq 'System.Boolean' })) {throw 'Opt-in endpoint sky fallback runtime option missing'}
     if($options.Fields | Where-Object Name -in @('LimitNativeRange','Distance','BypassHitNormal','GlobalContinuedSky')) {throw 'Removed controls remain in runtime options'}
     if($options.Fields | Where-Object Name -in @('DdaForeground','SimpleMirrorTraversal')) {throw 'Removed traversal experiment remains in runtime options'}
     if($options.Fields | Where-Object Name -match 'Amd|Denoiser|Spatial|HitAware|GapFill|ForegroundSky|ForegroundAdjacent|ForegroundPermissiveness|Shallow|VarianceStrength|Direction|MatchCameraAspect|ConstrainHitToCell|HitNormalConfidenceOnly|RelaxOccluderReturn|SkyAfterContinuation') {throw 'Retired option fields remain'}
@@ -94,6 +95,11 @@ $pipelineSource=Get-Content (Join-Path $repo 'Source/StochasticSSR/SsrPipeline.c
 if($traceSource -notmatch '#pragma multi_compile_local _ FTFX_TRACE_DIAGNOSTICS' -or $traceSource -match '_DirectionMode|_HitNormalConfidenceOnly|_ConstrainHitToCell') {throw 'Diagnostic variant or fixed tracer behavior mismatch'}
 if($traceSource -notmatch '#pragma multi_compile_local _ FTFX_REJECTION_DIAGNOSTICS' -or $traceSource -match 'OctDecode') {throw 'Optional rejection diagnostic variant or shader cleanup mismatch'}
 if($pipelineSource -notmatch 'if\(continuedSkyKernel>=0\)') {throw 'All-receiver continued sky must run without water capture'}
+if($pipelineSource -notmatch 'SetComputeIntParam\(compute,"_EndpointSkyFallback",o.EndpointSkyFallback\?1:0\)') {throw 'Endpoint sky fallback toggle does not reach the existing finalizer'}
+$validation=Get-Content (Join-Path $repo 'obj/NrdStandardValidation/validation.txt') -Raw
+foreach($check in @('actual foreground mirror scene recovers endpoint sky for multiple receivers','endpoint fallback disable restores exact frozen pipeline results','seeded foreground reason 11 recovers approximate sky','seeded foreground reason 8 recovers approximate sky','completed sky retains its separate diagnostic classification','enabling endpoint sky fallback invalidates NRD history','disabling endpoint sky fallback invalidates NRD history')) {
+    if(-not $validation.Contains($check)) {throw "Missing executed endpoint sky validation: $check"}
+}
 $rasterSource=Get-Content (Join-Path $repo 'Source/StochasticSSR/SsrRasterState.cs') -Raw
 $rasterShader=Get-Content (Join-Path $repo 'unity/StochasticSSR/RasterState.hlsl') -Raw
 if($rasterSource -notmatch 'ComputeBuffer\(16,16\)' -or $rasterSource -match 'Store\((16|20|24),' -or $rasterShader -match 'SsrRasterHistory|SsrHistoryUV') {throw 'Unused temporal raster uploads/helpers remain'}

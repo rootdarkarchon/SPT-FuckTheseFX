@@ -8,14 +8,17 @@ namespace FuckTheseFX.Source.StochasticSSR
     internal enum SsrMode { Native, Stochastic }
     public enum ReflectionReconstruction { Custom, NativeGaussian }
     public enum ReflectionResolution { R256=256, R512=512, R768=768, R1024=1024, R1536=1536, R2048=2048 }
+    public enum OpticReflectionResolution { R256=256, R512=512, R768=768 }
     public enum ReflectionView { Normal=0, HitMask=1, HitUV=2, HitDepthDistance=3, RawHitRadiance=4, TodSkyRadiance=5, EnvironmentProbeRadiance=6, SourceClassification=7, Confidence=8, ChosenRadiance=9, NormalLength=10, NormalizedNormal=11, MaterialWeight=12, EnvironmentContribution=13, ReplacementDelta=14, EnvironmentRemovedScene=15, AddedReflection=16, TraceTermination=25, CoverageStages=26, ReconstructionLoss=27, ReceiverColourFallback=28, WaterCoverage=29, ContinuationSource=30, ContinuationCost=31, RejectionLocation=32, HaloStages=33, DepthHitKind=34, DepthHitConfidence=35, GapFillCoverage=36 }
     internal struct Options
     {
         internal SsrMode Mode;
         internal int Steps,HistoryFrames,ContinuationSamples;
         internal float Thickness,Smoothness,EdgePixels,FallbackStrength,SurfaceColourInfluence,ContinuationPixels,ContinuationDepth,ThicknessConfidenceFloor;
-        internal bool Temporal,Freeze,CaptureContinuation,CaptureTraversal;
+        internal bool Temporal,Freeze,CaptureContinuation,CaptureTraversal,EndpointSkyFallback;
         internal ReflectionResolution Resolution;
+        internal bool Optics,ReduceMainInOptics;
+        internal ReflectionResolution OpticResolution;
         internal ReflectionView View;
         internal ReflectionReconstruction Reconstruction;
         internal float? ReceiverCutoff;
@@ -75,30 +78,53 @@ namespace FuckTheseFX.Source.StochasticSSR
             SystemInfo.graphicsDeviceType==GraphicsDeviceType.Direct3D11 && SystemInfo.supportsComputeShaders &&
             SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.ARGBFloat) && SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.RFloat) && SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.ARGBHalf);
         internal bool Ready {
-            get {if(!Created(NativeResult) || !Created(Radiance) || !Created(Hit) || !Created(HitPoint) || !Created(Record) || !Created(TraceInfo) || Depth.Count==0)return false;
-                foreach(var d in Depth)if(!Created(d))return false;return true;}
+            get {return CameraTargetsReady() && Created(Radiance) && TraceTargetsReady(Radiance.width,Radiance.height);}
         }
         private static bool Created(RenderTexture t)=>t!=null && t.IsCreated();
+        private static bool Sized(RenderTexture t,int w,int h)=>Created(t) && t.width==w && t.height==h;
+        private bool CameraTargetsReady()
+        {
+            if(CameraWidth<=0 || CameraHeight<=0 || !Sized(NativeResult,CameraWidth,CameraHeight) || NativeResult.format!=format)return false;
+            int w=CameraWidth,h=CameraHeight,index=0;
+            while(true) {
+                if(index>=Depth.Count || !Sized(Depth[index],w,h))return false;
+                index++;if(w==1 && h==1)return index==Depth.Count;
+                w=(w+1)/2;h=(h+1)/2;
+            }
+        }
+        private bool TraceTargetsReady(int w,int h)=>Sized(Radiance,w,h) && Sized(Hit,w,h) && Sized(HitPoint,w,h) && Sized(Record,w,h) && Sized(TraceInfo,w,h);
         internal void Ensure(int w,int h,int size,RenderTextureFormat sceneFormat)=>Ensure(w,h,size,size,sceneFormat);
         internal void Ensure(int w,int h,int traceWidth,int traceHeight,RenderTextureFormat sceneFormat)
         {
-            if(Ready && CameraWidth==w && CameraHeight==h && Radiance.width==traceWidth && Radiance.height==traceHeight && format==sceneFormat)return;
-            Release();CameraWidth=w;CameraHeight=h;format=sceneFormat;
-            NativeResult=Target("alias result",w,h,sceneFormat,false);
-            Radiance=Target("raw hit radiance and estimator",traceWidth,traceHeight,RenderTextureFormat.ARGBHalf);
-            Hit=Target("confidence and receiver",traceWidth,traceHeight,RenderTextureFormat.ARGBFloat);
-            HitPoint=Target("hit geometry and smoothness",traceWidth,traceHeight,RenderTextureFormat.ARGBFloat);
-            Record=Target("source classification and exact source cell",traceWidth,traceHeight,RenderTextureFormat.ARGBFloat);
-            TraceInfo=Target("continuation samples pixels depth flags",traceWidth,traceHeight,RenderTextureFormat.ARGBFloat);
-            // Partial edge cells use the same minimum as far-plane padding.
-            // Keep cell sizes in camera pixels, but avoid processing the padding.
-            int dw=w,dh=h;
-            while(true){Depth.Add(Target("Hi-Z "+Depth.Count,dw,dh,RenderTextureFormat.RFloat));if(dw==1 && dh==1)break;dw=(dw+1)/2;dh=(dh+1)/2;}
+            if(w<=0 || h<=0 || traceWidth<=0 || traceHeight<=0)throw new ArgumentOutOfRangeException("SSR target dimensions must be positive");
+            bool keepCamera=CameraWidth==w && CameraHeight==h && format==sceneFormat && CameraTargetsReady();
+            if(keepCamera && TraceTargetsReady(traceWidth,traceHeight))return;
+            if(keepCamera)ReleaseTrace();else Release();
+            try {
+                if(!keepCamera) {
+                    CameraWidth=w;CameraHeight=h;format=sceneFormat;
+                    NativeResult=Target("alias result",w,h,sceneFormat,false);
+                    // Partial edge cells use the same minimum as far-plane padding.
+                    // Keep cell sizes in camera pixels, but avoid processing the padding.
+                    int dw=w,dh=h;
+                    while(true){Depth.Add(Target("Hi-Z "+Depth.Count,dw,dh,RenderTextureFormat.RFloat));if(dw==1 && dh==1)break;dw=(dw+1)/2;dh=(dh+1)/2;}
+                }
+                Radiance=Target("raw hit radiance and estimator",traceWidth,traceHeight,RenderTextureFormat.ARGBHalf);
+                Hit=Target("confidence and receiver",traceWidth,traceHeight,RenderTextureFormat.ARGBFloat);
+                HitPoint=Target("hit geometry and smoothness",traceWidth,traceHeight,RenderTextureFormat.ARGBFloat);
+                Record=Target("source classification and exact source cell",traceWidth,traceHeight,RenderTextureFormat.ARGBFloat);
+                TraceInfo=Target("continuation samples pixels depth flags",traceWidth,traceHeight,RenderTextureFormat.ARGBFloat);
+            } catch {
+                // Retain a complete compatible camera hierarchy, never a partial trace grid.
+                if(keepCamera)ReleaseTrace();else Release();
+                throw;
+            }
         }
         private static RenderTexture Target(string name,int w,int h,RenderTextureFormat f,bool random=true)
         {
             var t=new RenderTexture(w,h,0,f,RenderTextureReadWrite.Linear){name="FTFX SSR "+name,enableRandomWrite=random,filterMode=FilterMode.Point,wrapMode=TextureWrapMode.Clamp,hideFlags=HideFlags.HideAndDontSave};
-            if(t.Create())return t;UnityEngine.Object.DestroyImmediate(t);throw new InvalidOperationException("SSR allocation failed: "+name);
+            try {if(t.Create())return t;throw new InvalidOperationException("SSR allocation failed: "+name);}
+            catch {t.Release();UnityEngine.Object.DestroyImmediate(t);throw;}
         }
         internal void ResetHistory(){sampleIndex=0;}
         internal void Trace(CommandBuffer cb,Camera camera,RenderTargetIdentifier source,Options o,RenderTargetIdentifier? rawDepth=null,RenderTargetIdentifier? normals=null,RenderTargetIdentifier? specular=null,bool diagnostics=false,bool preserveDiagnostics=false,bool traversalDiagnostics=false)
@@ -135,6 +161,7 @@ namespace FuckTheseFX.Source.StochasticSSR
             cb.SetComputeIntParam(compute,"_Frame",LastSamplePhase);
             cb.SetComputeFloatParam(compute,"_EdgePixels",o.EdgePixels);
             cb.SetComputeFloatParam(compute,"_ThicknessConfidenceFloor",o.ThicknessConfidenceFloor);
+            cb.SetComputeIntParam(compute,"_EndpointSkyFallback",o.EndpointSkyFallback?1:0);
             cb.SetComputeVectorParam(compute,"_Continuation",new Vector4(o.ContinuationSamples,o.ContinuationPixels,o.ContinuationDepth,0));
             cb.SetComputeIntParam(compute,"_ZeroSmoothnessProbe",o.ZeroSmoothnessProbe?1:0);
             using(SsrGpuSample.Measure(cb,camera,"HiZ build")) {
@@ -178,7 +205,8 @@ namespace FuckTheseFX.Source.StochasticSSR
             cb.SetGlobalTexture("_MainTex",source);cb.SetRenderTarget(target,RenderBufferLoadAction.DontCare,RenderBufferStoreAction.Store);cb.DrawMesh(triangle,Matrix4x4.identity,support,0,pass,properties);
         }
         private void Drop(ref RenderTexture t){if(t!=null){if(RetireTexture!=null)RetireTexture(t);else {t.Release();UnityEngine.Object.DestroyImmediate(t);}}t=null;}
-        private void Release(){Drop(ref NativeResult);Drop(ref Radiance);Drop(ref Hit);Drop(ref HitPoint);Drop(ref Record);Drop(ref TraceInfo);Drop(ref TraceStop);Drop(ref DepthHit);Drop(ref Sample);foreach(var d in Depth){var target=d;Drop(ref target);}Depth.Clear();ResetHistory();}
+        private void ReleaseTrace(){Drop(ref Radiance);Drop(ref Hit);Drop(ref HitPoint);Drop(ref Record);Drop(ref TraceInfo);Drop(ref TraceStop);Drop(ref DepthHit);Drop(ref Sample);ResetHistory();}
+        private void Release(){ReleaseTrace();Drop(ref NativeResult);foreach(var d in Depth){var target=d;Drop(ref target);}Depth.Clear();CameraWidth=CameraHeight=0;}
         public void Dispose(){Raster.Dispose();Release();UnityEngine.Object.DestroyImmediate(compute);UnityEngine.Object.DestroyImmediate(support);UnityEngine.Object.DestroyImmediate(triangle);}
     }
 }

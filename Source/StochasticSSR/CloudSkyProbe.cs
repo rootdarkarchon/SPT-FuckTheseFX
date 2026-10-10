@@ -64,6 +64,9 @@ namespace FuckTheseFX.Source.StochasticSSR
         {
             if(__state==null)return;var self=__state.Owner;
             try {
+                // The native probe refresh may run callbacks that change SSR's
+                // activity after the prefix captured a valid sky source.
+                if(self.disposed || self.failed || !ReferenceEquals(Active,self) || self.Requested?.Invoke()!=true)return;
                 var rt=self.cube.GetValue(__instance) as RenderTexture;
                 if(rt==null || !rt.IsCreated())return;
                 var previous=self.states.GetValue(__instance,_=>new ProbeState());

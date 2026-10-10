@@ -1,6 +1,6 @@
 # Configuration
 
-F12 > Fuck These FX exposes 98 settings and four preset buttons. Numeric ranges are inclusive. Names ending in (%) store literal integer percentages; 20 means 20%, even when the maximum is 50.
+F12 > Fuck These FX exposes 103 settings and four preset buttons. Numeric ranges are inclusive. Names ending in (%) store literal integer percentages; 20 means 20%, even when the maximum is 50.
 
 Groups appear in numeric order: Presets, Vanilla Optimizations, XeGTAO, Screen Space Contact Global Illumination, Stochastic GGX SSR, Custom Water, Debug.
 
@@ -12,9 +12,9 @@ The following note appears above the buttons:
 
 > Hold Shift while pressing on a preset button to restore full defaults. FTFX provides more settings than shown when enabling "Advanced Settings". The current advanced settings, presets and defaults are tuned and authored for visuals and performance.
 
-**Vanilla**, **FTFX Vanilla+ (Default)**, **FTFX HQ Visuals**, and **FTFX HQ+ Visuals** change only the eleven controls below on a normal click. All other values, including SSR history, water mode, tuning, and diagnostics, are preserved by these selective presets.
+**Vanilla**, **FTFX Vanilla+ (Default)**, **FTFX HQ Visuals**, and **FTFX HQ+ Visuals** change the eleven shared controls below on a normal click. HQ Visuals disables optic SSR; HQ+ Visuals enables it. Vanilla and Vanilla+ preserve optic enablement. All presets preserve optic resolution, which defaults to R512. All other values, including the main-resolution reduction toggle, SSR history, water mode, tuning, and diagnostics, are preserved by these selective presets.
 
-Holding Shift while clicking any preset restores every shipped default first, then applies the selected preset's controls. For example, Shift-clicking FTFX HQ Visuals resets advanced settings, water mode, diagnostics and SSR history before applying HQ visuals. HQ+ uses the HQ Visuals baseline and additionally enables SSCGI.
+Holding Shift while clicking any preset restores every shipped default first, then applies the selected preset's controls. For example, Shift-clicking FTFX HQ Visuals resets advanced settings, water mode, diagnostics and SSR history before applying HQ visuals. HQ+ uses the HQ Visuals baseline and enables SSCGI and optic SSR. Shift-click restores R512 optic resolution for every preset.
 
 | Setting in Vanilla Optimizations (unless noted) | Vanilla | FTFX Vanilla+ | FTFX HQ Visuals | FTFX HQ+ Visuals |
 |---|---|---|---|---|
@@ -29,6 +29,8 @@ Holding Shift while clicking any preset restores every shipped default first, th
 | 2. XeGTAO / Enabled | false | false | true | true |
 | 3. Screen Space Contact Global Illumination / Enabled | false | false | false | true |
 | 4. Stochastic GGX SSR / Enabled | false | false | true | true |
+| 4. Stochastic GGX SSR / Optic SSR enabled | Preserved | Preserved | false | true |
+| 4. Stochastic GGX SSR / Optic SSR resolution | Preserved | Preserved | Preserved | Preserved |
 
 Existing configuration sections are not migrated or explicitly cleaned. Changed shipped defaults do not overwrite saved values; Shift-click FTFX Vanilla+ (Default) to restore the new defaults.
 
@@ -106,15 +108,20 @@ Existing configuration sections are not migrated or explicitly cleaned. Changed 
 |---|---|---|---|---|
 | Enabled | false | false, true | bool | No |
 | SSR resolution | R768 | `ReflectionResolution` choices below | enum | No |
+| Optic SSR enabled | true | false, true | bool | No |
+| Optic SSR resolution | R512 | R256, R512, R768 | enum | Yes |
+| Reduce main SSR in optics | true | false, true | bool | Yes |
 | Maximum iterations | 350 | 32 – 1024 | int | Yes |
 | Thickness | 1 | 0.01 – 1 | float | Yes |
 | Thickness hit confidence floor (%) | 100 | 0 – 100 | int | Yes |
 | Occluder continuation samples | 350 | 0 – 1000 | int | Yes |
 | Occluder continuation pixels | 500 | 0 – 2000 | float | Yes |
 | Occluder continuation depth separation | 200 | 0 – 500 | float | Yes |
+| Endpoint-validated sky fallback | true | false, true | bool | Yes |
 | Capture continuation diagnostics | false | false, true | bool | Yes |
 | Capture traversal work | false | false, true | bool | Yes |
 | Fallback strength (%) | 65 | 0 – 100 | int | Yes |
+| CloudSix fallback strength (%) | 100 | 0 – 100 | int | Yes |
 | Reconstruction backend | Custom | `ReflectionReconstruction` choices below | enum | Yes |
 | Minimum receiver smoothness (%) | 40 | 0 – 100 | int | Yes |
 | Cutoff environment blend (%) | 25 | 0 – 100 | int | Yes |
@@ -166,6 +173,7 @@ Existing configuration sections are not migrated or explicitly cleaned. Changed 
 - **FoliageLivePreview:** `Scene`, `BeforeAmbient`, `AfterAmbient`, `BeforeOpaque`, `AfterOpaque`, `AfterTransparency`, `AmbientDifference`, `OpaqueDifference`, `ExperimentalMask`.
 - **ReflectionReconstruction:** `Custom`, `NativeGaussian`.
 - **ReflectionResolution:** `R256`, `R512`, `R768`, `R1024`, `R1536`, `R2048`.
+- **OpticReflectionResolution:** `R256`, `R512`, `R768`.
 - **ReflectionView:** `Normal`, `HitMask`, `HitUV`, `HitDepthDistance`, `RawHitRadiance`, `TodSkyRadiance`, `EnvironmentProbeRadiance`, `SourceClassification`, `Confidence`, `ChosenRadiance`, `NormalLength`, `NormalizedNormal`, `MaterialWeight`, `EnvironmentContribution`, `ReplacementDelta`, `EnvironmentRemovedScene`, `AddedReflection`, `TraceTermination`, `CoverageStages`, `ReconstructionLoss`, `ReceiverColourFallback`, `WaterCoverage`, `ContinuationSource`, `ContinuationCost`, `RejectionLocation`, `HaloStages`, `DepthHitKind`, `DepthHitConfidence`, `GapFillCoverage`.
 - **WaterSurfaceMode:** `Native`, `FTFX`.
 - **DistantShadowMaskResolution:** `Quarter`, `Half`, `Full`.
