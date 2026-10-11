@@ -64,7 +64,43 @@ public static partial class OcclusionValidation {
   Require(gamma.a==0,"additive alpha contract");
   GpuAssets.Release(ref noisy);GpuAssets.Release(ref normal);GpuAssets.Release(ref depth);GpuAssets.Release(ref motion);GpuAssets.Release(ref output);GpuAssets.Release(ref expected);GpuAssets.Release(ref validation);UnityEngine.Object.DestroyImmediate(camera.gameObject);
   raster.Dispose();
+  NrdJitterValidation(assets,probe);
   results.Add("PASS: actual NRD diffuse native execution, one denoiser/no adapters, finite black/bright/colour inputs, hit-distance independence, cosine sampling, cancellation and odd dimensions.");
+ }
+ private static void NrdJitterValidation(GpuAssets assets,ComputeShader probe) {
+  const int w=320,h=240;int kernel=probe.FindKernel("Probe");
+  var noisy=GpuAssets.Target("jitter input",w,h,GraphicsFormat.R16G16B16A16_SFloat,true);
+  var normal=GpuAssets.Target("jitter normal",w,h,GraphicsFormat.A2B10G10R10_UNormPack32,true);
+  var depth=GpuAssets.Target("jitter depth",w,h,GraphicsFormat.R32_SFloat,true);
+  var motion=GpuAssets.Target("jitter motion",w,h,GraphicsFormat.R16G16B16A16_SFloat,true);
+  var output=GpuAssets.Target("jitter output",w,h,GraphicsFormat.R16G16B16A16_SFloat,true);
+  var expected=GpuAssets.Target("jitter probe",w,h,GraphicsFormat.R32G32B32A32_SFloat,true);
+  var validation=GpuAssets.Target("jitter validation",w,h,GraphicsFormat.R8G8B8A8_UNorm,true);
+  var camera=new GameObject("NRD jitter camera").AddComponent<Camera>();camera.enabled=false;
+  var projection=GL.GetGPUProjectionMatrix(camera.projectionMatrix,false);projection.SetRow(1,-projection.GetRow(1));
+  using(var raster=new ComputeBuffer(17,16)) {
+   raster.SetData(new Vector4[17]);probe.SetBuffer(kernel,"_GIRaster",raster);
+   probe.SetTexture(kernel,"_Probe",expected);probe.SetTexture(kernel,"_Radiance",noisy);probe.SetTexture(kernel,"_Normal",normal);probe.SetTexture(kernel,"_ViewZ",depth);probe.SetTexture(kernel,"_Motion",motion);probe.SetTexture(kernel,"_BlueNoise",assets.ColorBleedNoise);
+   probe.SetInt("_ProbeMode",2);probe.SetInt("_ProbeFrame",0);probe.Dispatch(kernel,(w+7)/8,(h+7)/8,1);
+   for(int sign=-1;sign<=1;sign+=2)using(var backend=new NrdDiffuseBackend(w,h)) {
+    var jitter=new Vector2(sign*.25f/w,-sign*.25f/h);
+    for(uint frame=4;frame<=5;frame++) {
+     var f=new NrdDiffuseBackend.Frame{Projection=projection,PreviousProjection=projection,View=camera.worldToCameraMatrix,PreviousView=camera.worldToCameraMatrix,Jitter=jitter,PreviousJitter=jitter,Reset=frame==4?1u:0,Frames=32,Index=frame,DeltaMs=16.666667f,Version=1,Radius=.75f,Validation=1};
+     using(var cb=new CommandBuffer()){backend.Queue(cb,noisy,normal,depth,motion,output,validation,f);Graphics.ExecuteCommandBuffer(cb);}
+     BleedPixels(output); // Fixture-only fence before reading the native diagnostic.
+     Require(backend.Stats.Status>=0,"jitter native execution: "+backend.Error);
+    }
+    var pixels=BleedPixels(validation);
+    // Pinned NRD's nano viewport is 16x16 at (0,16). Its marker is
+    // (cameraJitterPixels + .5)*16, giving (12,4) or (4,12).
+    // UV jitter would instead place it near the center (8,8).
+    var marker=pixels[(sign>0?20:28)*w+(sign>0?12:4)];var center=pixels[24*w+8];
+    Require(Mathf.Abs(marker.r-.66f)<.01f&&Mathf.Abs(marker.g-.66f)<.01f&&Mathf.Abs(marker.b-.66f)<.01f,"native NRD diagnostic locates signed pixel jitter");
+    Require(center.r<.01f&&center.g<.01f&&center.b<.01f,"native NRD diagnostic rejects UV-unit jitter");
+   }
+  }
+  GpuAssets.Release(ref noisy);GpuAssets.Release(ref normal);GpuAssets.Release(ref depth);GpuAssets.Release(ref motion);GpuAssets.Release(ref output);GpuAssets.Release(ref expected);GpuAssets.Release(ref validation);UnityEngine.Object.DestroyImmediate(camera.gameObject);
+  results.Add("PASS: compiled native bridge converts signed UV jitter to NRD input pixels in the actual upstream D3D11 validation shader.");
  }
  private static float DecodeGI(float c)=>c<=.04045f?c/12.92f:c<1?Mathf.Pow((c+.055f)/1.055f,2.4f):Mathf.Pow(c,2.2f);
  private static float EncodeGI(float c)=>c<=.0031308f?c*12.92f:c<1?1.055f*Mathf.Pow(c,1/2.4f)-.055f:Mathf.Pow(c,1/2.2f);

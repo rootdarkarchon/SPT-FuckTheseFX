@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include "NRD.h"
+#include "CameraJitter.h"
 #include "Pack.h"
 #include "Unpack.h"
 using Microsoft::WRL::ComPtr;
@@ -21,7 +22,7 @@ using Microsoft::WRL::ComPtr;
 namespace {
 struct Frame {
     float projection[16], previousProjection[16], view[16], previousView[16];
-    float jitter[2], previousJitter[2];
+    float jitter[2], previousJitter[2]; // texture UV offsets, converted at the NRD boundary
     uint32_t reset, frames, frameIndex, antiFirefly;float deltaMs;
 };
 static_assert(sizeof(Frame)==292,"Managed frame ABI");
@@ -222,7 +223,7 @@ void Run(Packet& p) {
     nrd::CommonSettings s{};
     memcpy(s.viewToClipMatrix,p.frame.projection,64);memcpy(s.viewToClipMatrixPrev,p.frame.previousProjection,64);
     memcpy(s.worldToViewMatrix,p.frame.view,64);memcpy(s.worldToViewMatrixPrev,p.frame.previousView,64);
-    memcpy(s.cameraJitter,p.frame.jitter,8);memcpy(s.cameraJitterPrev,p.frame.previousJitter,8);
+    ftfx::SetCameraJitter(s,p.frame.jitter,p.frame.previousJitter,b.width,b.height);
     s.resourceSize[0]=s.resourceSizePrev[0]=s.rectSize[0]=s.rectSizePrev[0]=uint16_t(b.width);
     s.resourceSize[1]=s.resourceSizePrev[1]=s.rectSize[1]=s.rectSizePrev[1]=uint16_t(b.height);
     s.frameIndex=p.frame.frameIndex;s.timeDeltaBetweenFrames=p.frame.deltaMs;s.denoisingRange=1e6f;

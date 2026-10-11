@@ -8,7 +8,7 @@ namespace FuckTheseFX.Source.Occlusion {
  internal sealed class NrdDiffuseBackend : IDisposable {
   [StructLayout(LayoutKind.Sequential)] internal struct Frame {
    internal Matrix4x4 Projection,PreviousProjection,View,PreviousView;
-   internal Vector2 Jitter,PreviousJitter;
+   internal Vector2 Jitter,PreviousJitter; // UV offsets; native bridge converts to NRD input pixels
    internal uint Reset,Frames,Index,AntiFirefly;
    internal float DeltaMs;
    internal uint Version;internal float Radius;internal uint Validation;

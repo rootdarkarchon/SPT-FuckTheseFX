@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $diffuseInputs=@('native/NRD/Bridge.cpp','obj/NRD/bridge/Release/FTFXNrd.dll','native/NRD/UPSTREAM.json','native/NRD/vendor/NRD/Shaders/NRD.hlsli','native/NRD/vendor/NRD/Shaders/NRDConfig.hlsli','Source/Occlusion/ColorBleedPipeline.cs','Source/Occlusion/ColorBleedSettings.cs','Source/Occlusion/NrdDiffuseBackend.cs','Source/Occlusion/ContactGICapture.cs','Source/Occlusion/GpuAssets.cs','Source/Occlusion/CameraOcclusion.cs','Source/Occlusion/XeGTAOIntegration.cs','SettingsCatalog.cs','unity/Assets/XeGTAO/ContactGI.compute','unity/Assets/XeGTAO/ContactGICommon.hlsl','unity/Assets/XeGTAO/ColorBleed.shader','unity/StochasticSSR/AMD/BlueNoise.bytes','unity/OcclusionValidation/NrdDiffuseValidation.cs','unity/OcclusionValidation/ContactGICameraValidation.cs','unity/OcclusionValidation/ContactGIPerformanceValidation.cs','unity/OcclusionValidation/ContactGIProbe.compute','unity/OcclusionValidation/ContactGIReplay.cs')
 $inputHashes=@{}
+$diffuseInputs += 'native/NRD/CameraJitter.h'
 foreach($file in $diffuseInputs){$inputHashes[$file]=(Get-FileHash -LiteralPath (Join-Path $repo $file)).Hash}
 $project = Join-Path $repo 'obj\OcclusionValidation'
 $editorStage=[IO.Path]::GetFullPath((Join-Path $project 'Assets/Editor'))
