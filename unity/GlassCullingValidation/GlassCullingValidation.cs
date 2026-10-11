@@ -290,6 +290,7 @@ public static class GlassCullingValidation
             Extended(glassMaterial, opaqueMaterial);
             ParentBoundaries(glassMaterial, opaqueMaterial);
             NativeStartup(glassMaterial, opaqueMaterial);
+            FogSixGlass(glassMaterial, opaqueMaterial);
             File.WriteAllLines("scaling.txt", new[] { SharedGroupScale(512, glassMaterial, opaqueMaterial), SharedGroupScale(1024, glassMaterial, opaqueMaterial) });
             File.WriteAllText("validation.txt", $"PASS: {assertions} glass culling assertions, including actual Harmony hooks in Unity 2022.3.43f1. Game fixtures are not a live raid test.");
         }
@@ -299,6 +300,114 @@ public static class GlassCullingValidation
             feature?.Dispose(); if (root) Object.DestroyImmediate(root);
             Singleton<AbstractGame>.Instance = null; Singleton<GameWorld>.Instance = null;
             if (glassMaterial) Object.DestroyImmediate(glassMaterial); if (opaqueMaterial) Object.DestroyImmediate(opaqueMaterial);
+        }
+    }
+
+    private static void FogSixGlass(Material nativeMaterial, Material opaqueMaterial)
+    {
+        var root = new GameObject("FogSix glass material swaps");
+        GlassCullingIntegration feature = null;
+        Material paneMaterial = null, noCanaryMaterial = null, unsupportedMaterial = null;
+        Shader noCanaryShader = null;
+        try
+        {
+            var fogSixShader = Shader.Find("FogSix/Glass/Transparent Reflective Specular");
+            Check(fogSixShader && fogSixShader.isSupported, "FogSix alias fixture compiled");
+            paneMaterial = new Material(fogSixShader);
+            Check(paneMaterial.HasProperty("_FogSixGlass"), "FogSix fixture exposes shader-swap canary");
+            paneMaterial.SetFloat("_FogSixGlass", 0);
+            var game = root.AddComponent<AbstractGame>(); game.Status = GameStatus.Started;
+            Singleton<AbstractGame>.Instance = game; Singleton<GameWorld>.Instance = root.AddComponent<GameWorld>();
+            var lod = root.AddComponent<LODGroup>();
+            var frame = Mesh(root.transform, "opaque frame", opaqueMaterial, Vector3.one * 4);
+            var pane = Mesh(root.transform, "already ported pane", paneMaterial, Vector3.one);
+            lod.SetLODs(new[] { new LOD(.01f, new[] { frame, pane }) });
+            var group = new PerfectCullingBakeGroup { renderers = new[] { frame } }; group.Init(); group.Toggle(false);
+            root.AddComponent<PerfectCullingCrossSceneGroup>().bakeGroups = new[] { group };
+            var content = root.AddComponent<PerfectCullingCrossSceneContentMeshes>();
+            content.Windows = new[] { pane }; content.BakeGroups = new[] { group };
+
+            Check(GlassCullingFamily.IsGlass(pane), "Exact FogSix specular alias with canary accepted");
+            paneMaterial.renderQueue = 2000;
+            Check(!GlassCullingFamily.IsOpaque(pane) && !GlassCullingFamily.HasOpaqueMaterial(pane),
+                "Ported pane at opaque queue cannot become an opaque visibility anchor");
+            frame.sharedMaterial = paneMaterial;
+            Check(GlassCullingIntegration.SelectFamily(lod, new HashSet<Renderer> { pane }, new[] { frame, pane },
+                new Dictionary<Renderer, HashSet<PerfectCullingBakeGroup>> { [frame] = new HashSet<PerfectCullingBakeGroup> { group } },
+                new HashSet<Renderer> { frame }, new HashSet<GameObject>(), out _) == null,
+                "Native-controlled ported pane cannot anchor another glass target at opaque queue");
+            frame.sharedMaterial = opaqueMaterial;
+            paneMaterial.renderQueue = -1;
+            pane.sharedMaterials = new[] { paneMaterial, opaqueMaterial };
+            Check(!GlassCullingFamily.IsGlass(pane), "Ported glass mixed with opaque material rejected as a target");
+            pane.sharedMaterials = new[] { paneMaterial, nativeMaterial };
+            Check(GlassCullingFamily.IsGlass(pane), "Native and supported ported glass slots can coexist");
+            pane.sharedMaterials = new[] { paneMaterial };
+
+            // Compile separately rather than importing two assets with the same Shader.Find name.
+            noCanaryShader = ShaderUtil.CreateShaderAsset(
+                "Shader \"FogSix/Glass/Transparent Reflective Specular\" { SubShader { Tags { \"Queue\"=\"Transparent\" } Pass { Color (1,0,1,1) } } }");
+            Check(noCanaryShader && noCanaryShader.name == fogSixShader.name, "No-canary fixture uses the exact supported alias");
+            noCanaryMaterial = new Material(noCanaryShader);
+            Check(!noCanaryMaterial.HasProperty("_FogSixGlass"), "Negative alias fixture lacks the canary");
+            pane.sharedMaterial = noCanaryMaterial;
+            Check(!GlassCullingFamily.IsGlass(pane), "Exact FogSix alias without canary rejected");
+            unsupportedMaterial = new Material(Shader.Find("FogSix/Glass/Transparent Bumped Specular"));
+            Check(unsupportedMaterial.HasProperty("_FogSixGlass"), "Unsupported alias fixture has a valid canary");
+            pane.sharedMaterial = unsupportedMaterial;
+            Check(!GlassCullingFamily.IsGlass(pane), "Other FogSix glass suffix rejected despite canary");
+            pane.sharedMaterial = paneMaterial;
+
+            Plugin.GlassCullingEnabled.Value = true;
+            feature = new GlassCullingIntegration(); feature.Initialize(); feature.Update(); Discover(feature);
+            var familyField = typeof(GlassCullingIntegration).GetField("families", BindingFlags.Instance | BindingFlags.NonPublic);
+            // Discovery is scene-wide; Run's other fixture root remains alive. Select this pane's
+            // association explicitly and reject missing or duplicate ownership for this target.
+            Func<GlassCullingFamily> paneFamily = () =>
+            {
+                var matches = ((List<GlassCullingFamily>)familyField.GetValue(feature))
+                    .FindAll(family => Array.IndexOf(family.Glass, pane) >= 0);
+                return matches.Count == 1 ? matches[0] : null;
+            };
+            Check(paneFamily() != null && pane.forceRenderingOff, "Discovery associates glass already ported by FogSix");
+            group.Toggle(true); Check(!pane.forceRenderingOff, "Native visibility callback releases already ported pane");
+            group.RuntimeSetForceRenderingOff(true); Check(pane.forceRenderingOff, "Native force-off callback suppresses already ported pane");
+            group.RuntimeSetForceRenderingOff(false); Check(!pane.forceRenderingOff, "Native force-off restoration releases already ported pane");
+            group.Toggle(false);
+            Plugin.GlassCullingEnabled.Value = false; feature.Update();
+            Check(!pane.forceRenderingOff, "Culling toggle restores already ported pane");
+            Plugin.GlassCullingEnabled.Value = true; feature.Update(); Discover(feature);
+            Check(pane.forceRenderingOff, "Culling toggle rediscovers already ported pane");
+
+            // FogSix swaps shader in place. Establish a native association, then swap without invalidation.
+            Plugin.GlassCullingEnabled.Value = false; feature.Update();
+            paneMaterial.shader = nativeMaterial.shader;
+            Plugin.GlassCullingEnabled.Value = true; feature.Update(); Discover(feature);
+            var originalFamily = paneFamily();
+            Check(originalFamily != null && pane.forceRenderingOff, "Native material association established before shader swap");
+            paneMaterial.shader = fogSixShader; Repair(feature);
+            Check(ReferenceEquals(originalFamily, paneFamily()) && pane.forceRenderingOff,
+                "Native-to-FogSix shader swap preserves the existing association and suppression");
+            group.Toggle(true); Check(!pane.forceRenderingOff, "Native visibility callback releases pane after FogSix shader swap");
+            group.Toggle(false); Check(pane.forceRenderingOff, "Native visibility callback suppresses pane after FogSix shader swap");
+            paneMaterial.shader = nativeMaterial.shader; Repair(feature);
+            Check(ReferenceEquals(originalFamily, paneFamily()) && pane.forceRenderingOff,
+                "FogSix-to-native shader swap preserves the existing association and suppression");
+            group.Toggle(true); Check(!pane.forceRenderingOff, "Native visibility callback releases pane after shader restoration");
+            group.Toggle(false);
+            Plugin.GlassCullingEnabled.Value = false; feature.Update();
+            Check(!pane.forceRenderingOff, "Culling toggle restores shader-swapped pane");
+            Plugin.GlassCullingEnabled.Value = true; feature.Update(); Discover(feature);
+            Check(pane.forceRenderingOff, "Culling toggle rediscovers shader-restored pane");
+        }
+        finally
+        {
+            feature?.Dispose(); Object.DestroyImmediate(root);
+            if (paneMaterial) Object.DestroyImmediate(paneMaterial);
+            if (noCanaryMaterial) Object.DestroyImmediate(noCanaryMaterial);
+            if (unsupportedMaterial) Object.DestroyImmediate(unsupportedMaterial);
+            if (noCanaryShader) Object.DestroyImmediate(noCanaryShader);
+            Singleton<AbstractGame>.Instance = null; Singleton<GameWorld>.Instance = null;
         }
     }
 

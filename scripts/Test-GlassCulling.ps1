@@ -10,7 +10,7 @@ $project = Join-Path $repo 'obj\GlassCullingValidation'
 foreach ($folder in @('Assets\Editor','Packages','ProjectSettings')) { New-Item -ItemType Directory -Force (Join-Path $project $folder) | Out-Null }
 Copy-Item (Join-Path $repo 'Source\GlassCulling\*.cs') (Join-Path $project 'Assets\Editor') -Force
 Copy-Item (Join-Path $repo 'unity\GlassCullingValidation\GlassCullingValidation.cs') (Join-Path $project 'Assets\Editor') -Force
-Copy-Item (Join-Path $repo 'unity\GlassCullingValidation\GlassFixture.shader') (Join-Path $project 'Assets') -Force
+Copy-Item (Join-Path $repo 'unity\GlassCullingValidation\*.shader') (Join-Path $project 'Assets') -Force
 foreach ($dependency in @('0Harmony.dll','Mono.Cecil.dll','Mono.Cecil.Mdb.dll','Mono.Cecil.Pdb.dll','Mono.Cecil.Rocks.dll','MonoMod.Utils.dll','MonoMod.RuntimeDetour.dll')) {
     Copy-Item (Join-Path $SptInstallPath "BepInEx\core\$dependency") (Join-Path $project 'Assets\Editor') -Force
 }

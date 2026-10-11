@@ -1,6 +1,10 @@
 # Glass Culling Fix
 
-**F12 > Fuck These FX > 1. Vanilla Optimizations > Streets of Tarkov Glass Culling Fix** is on by default and active only on Streets of Tarkov. It stays inactive on every other map, where relevant performance gains have not been demonstrated. It applies to the known `Global Fog/Transparent Reflective Specular` population on vehicles and buildings, without object-name or distance rules.
+**F12 > Fuck These FX > 1. Vanilla Optimizations > Streets of Tarkov Glass Culling Fix** is on by default and active only on Streets of Tarkov. It stays inactive on every other map, where relevant performance gains have not been demonstrated. It applies to the known `Global Fog/Transparent Reflective Specular` population on vehicles and buildings, including FogSix's corresponding `FogSix/Glass/Transparent Reflective Specular` port when its `_FogSixGlass` property is present, without object-name or distance rules.
+
+FogSix swaps the shader on existing shared materials and preserves their render queues. Discovery recognizes the supported native and FogSix versions equally, and existing renderer associations survive swaps in either direction without a rescan or additional Harmony hooks. Supported glass is also excluded from opaque-reference classification, even with an opaque queue override. Other FogSix glass shaders and ports missing the marker remain outside the supported target population. This compatibility rule does not change FogSix's materials, rendering, configuration or fog globals.
+
+The Unity classification fixtures cover discovery with already ported materials, native-to-FogSix-to-native swaps on existing associations, native visibility callbacks, culling toggles, mixed-material targets, missing markers, unsupported shader suffixes and opaque queue overrides. They model the material identity contract; they do not reproduce FogSix's compiled glass rendering or establish live visual correctness.
 
 ## What the installed manager does
 

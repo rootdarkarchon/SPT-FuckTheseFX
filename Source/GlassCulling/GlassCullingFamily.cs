@@ -28,13 +28,23 @@ namespace FuckTheseFX.Source.GlassCulling
             forced = new bool[glass.Length];
         }
 
+        private static bool IsGlassMaterial(Material material)
+        {
+            if (!material || !material.shader) return false;
+            var name = material.shader.name;
+            // FogSix preserves the native suffix and validates this property before accepting its port.
+            // Both shaders describe the same pane population across in-place swaps and restoration.
+            return name == "Global Fog/Transparent Reflective Specular" ||
+                (name == "FogSix/Glass/Transparent Reflective Specular" && material.HasProperty("_FogSixGlass"));
+        }
+
         internal static bool IsGlass(Renderer renderer)
         {
             if (!(renderer is MeshRenderer) || renderer.shadowCastingMode == ShadowCastingMode.ShadowsOnly) return false;
             var materials = renderer.sharedMaterials;
             if (materials.Length == 0) return false;
             foreach (var material in materials)
-                if (!material || !material.shader || material.shader.name != "Global Fog/Transparent Reflective Specular") return false;
+                if (!IsGlassMaterial(material)) return false;
             return true;
         }
 
@@ -45,7 +55,7 @@ namespace FuckTheseFX.Source.GlassCulling
             if (materials.Length == 0) return false;
             foreach (var material in materials)
                 if (!material || !material.shader || material.renderQueue > 2500 ||
-                    material.shader.name == "Global Fog/Transparent Reflective Specular") return false;
+                    IsGlassMaterial(material)) return false;
             return true;
         }
 
@@ -56,7 +66,7 @@ namespace FuckTheseFX.Source.GlassCulling
             if (!renderer || renderer.shadowCastingMode == ShadowCastingMode.ShadowsOnly) return false;
             foreach (var material in renderer.sharedMaterials)
                 if (material && material.shader && material.renderQueue <= 2500 &&
-                    material.shader.name != "Global Fog/Transparent Reflective Specular") return true;
+                    !IsGlassMaterial(material)) return true;
             return false;
         }
 
