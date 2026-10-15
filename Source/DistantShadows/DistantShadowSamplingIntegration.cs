@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
-using System.Security.Cryptography;
 using HarmonyLib;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -15,7 +14,6 @@ namespace FuckTheseFX.Source.DistantShadows
     // EFT retains allocation and command ordering for the selected resolution.
     internal sealed class DistantShadowSamplingIntegration : IDisposable
     {
-        private const string ResourcesHash = "78F26AFBB461338ADC1DBE13F9E5006EE5D35ED5AE55E4BEE624EF62AF4E5FE0";
         private static DistantShadowSamplingIntegration active;
         private AssetBundle bundle;
         private Shader shader;
@@ -46,10 +44,10 @@ namespace FuckTheseFX.Source.DistantShadows
             {
                 if (SystemInfo.graphicsDeviceType != GraphicsDeviceType.Direct3D11)
                     throw new NotSupportedException("Distant shadow sampling requires Direct3D11.");
-                using (var stream = File.OpenRead(Path.Combine(Application.dataPath, "resources.assets")))
-                using (var sha = SHA256.Create())
-                    if (BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "") != ResourcesHash)
-                        throw new NotSupportedException("Unsupported EFT distant-shadow shaders; expected EFT 40743.");
+                // Assets are fixed for this supported game build. Full content hashes
+                // belong to build validation, not the executable-to-menu path.
+                if (typeof(DistantShadow).Module.ModuleVersionId != new Guid("cc2d80b0-6d5b-4cb1-a581-6d2cc901d4c7"))
+                    throw new NotSupportedException("Unsupported EFT distant-shadow ABI; expected EFT 40743.");
                 method = AccessTools.DeclaredMethod(typeof(DistantShadow), "SetupComputeShadowMaskCommandBuffer",
                     new[] { typeof(CommandBuffer), typeof(int), typeof(int), typeof(Vector4), typeof(Vector4),
                         typeof(Rect), typeof(Rect), typeof(DistantShadow.ResolutionState), typeof(RenderTexture),
