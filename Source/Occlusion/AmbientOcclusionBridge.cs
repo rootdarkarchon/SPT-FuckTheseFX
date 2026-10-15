@@ -1,10 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Reflection;
 using System.Reflection.Emit;
 using UnityEngine.Rendering;
-using System.Security.Cryptography;
 using HarmonyLib;
 using UnityEngine;
 using FuckTheseFX.Source.StochasticSSR;
@@ -15,7 +13,6 @@ namespace FuckTheseFX.Source.Occlusion
     // only diffuse/fill occlusion and optional directional SH. EFT owns the materials and draw scheduling.
     internal sealed class AmbientOcclusionBridge : IDisposable
     {
-        private const string ShaderHash = "D41092507FC8CADCDC3DB1D53B9F1E0CB9FC7061AD07FF3C980284731AE2091C";
         private static AmbientOcclusionBridge instance;
         private readonly Shader shader;
         private readonly OcclusionSettings settings;
@@ -35,10 +32,8 @@ namespace FuckTheseFX.Source.Occlusion
             try
             {
                 if(shader == null || !shader.isSupported) throw new InvalidOperationException("Ambient shader unavailable.");
-                using(var file = File.OpenRead(Path.Combine(Application.dataPath,"StreamingAssets","Windows","shaders")))
-                using(var sha = SHA256.Create())
-                    if(BitConverter.ToString(sha.ComputeHash(file)).Replace("-","") != ShaderHash)
-                        throw new InvalidOperationException("Unrecognized EFT shader bundle; CustomAmbient fix requires EFT 40743.");
+                if(typeof(AmbientLight).Module.ModuleVersionId != new Guid("cc2d80b0-6d5b-4cb1-a581-6d2cc901d4c7"))
+                    throw new InvalidOperationException("Unsupported EFT ambient ABI; expected EFT 40743.");
                 materialField = AccessTools.Field(typeof(AmbientLight),"_screenAmbientMaterial") ?? throw new MissingFieldException("AmbientLight._screenAmbientMaterial");
                 var method = AccessTools.Method(typeof(AmbientLight),"InitAmbientBuffer",new[] {typeof(AmbientLight.CamSettings),typeof(Camera)})
                     ?? throw new MissingMethodException("AmbientLight.InitAmbientBuffer");

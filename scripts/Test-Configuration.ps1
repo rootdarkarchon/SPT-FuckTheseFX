@@ -181,4 +181,22 @@ foreach ($savePolicy in @($false,$true)) {
 }
 $bindArgs[0]=$config;$null=$bind.Invoke($null,$bindArgs)
 if ($config.Count -ne 104) { throw 'Repeated binding duplicated settings' }
+foreach ($savePolicy in @($false,$true)) {
+    $startupPath=Join-Path $testRoot "startup-save-$savePolicy.cfg"
+    $original="[1. Vanilla Optimizations]`nUltimate Bloom Input Scale (%) = 75`n`n[External Preserved]`nUnbound = keep`n"
+    [IO.File]::WriteAllText($startupPath,$original)
+    $startupConfig=[BepInEx.Configuration.ConfigFile]::new($startupPath,$false)
+    $startupConfig.SaveOnConfigSet=$savePolicy
+    $bindArgs[0]=$startupConfig;$null=$bind.Invoke($null,$bindArgs)
+    if ($startupConfig.SaveOnConfigSet -ne $savePolicy -or $startupConfig.Count -ne 104) { throw 'Startup binding changed save policy or catalog' }
+    $bloomEntry=$startupConfig[[BepInEx.Configuration.ConfigDefinition]::new('1. Vanilla Optimizations','Ultimate Bloom Input Scale (%)')]
+    if ($bloomEntry.Value -ne 75) { throw 'Startup binding lost an existing setting' }
+    $text=[IO.File]::ReadAllText($startupPath)
+    if (-not $savePolicy -and $text -ne $original) { throw 'Startup binding saved despite disabled automatic saving' }
+    if ($savePolicy -and ($text -notmatch 'Unbound = keep' -or $text -notmatch '\[9\. Debug\]')) { throw 'Startup save lost unbound settings or omitted the catalog tail' }
+    if ($savePolicy) {
+        $bloomEntry.Value=80
+        if ([IO.File]::ReadAllText($startupPath) -notmatch 'Ultimate Bloom Input Scale \(%\) = 80') { throw 'Automatic saving was not restored after startup' }
+    }
+}
 Write-Output 'Verified 103 settings, numerically ordered CM 18.4 groups, integer percentages, eight-frame SSR default, default-on endpoint sky fallback, normal optic toggle, R512 optic default and preserved preset resolution, four preset labels/tooltips and help text, selective and Shift-reset presets, save policy and persistence.'

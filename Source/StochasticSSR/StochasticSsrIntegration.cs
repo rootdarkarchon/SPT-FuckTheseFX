@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Security.Cryptography;
 using EFT.CameraControl;
 using HarmonyLib;
 using UnityEngine;
@@ -28,9 +27,9 @@ namespace FuckTheseFX.Source.StochasticSSR
         {
             try
             {
-                var renderer=AccessTools.TypeByName("UnityEngine.Rendering.PostProcessing.ScreenSpaceReflectionsRenderer") ?? throw new TypeLoadException("Native SSR renderer missing");
-                Verify(renderer.Assembly.Location,"B8055ECC0C1A6BA0A04427066A3DEF8C87DA90C1EAC071FA72D8193521441548");
-                Verify(Path.Combine(Application.dataPath,"StreamingAssets","Windows","shaders"),"D41092507FC8CADCDC3DB1D53B9F1E0CB9FC7061AD07FF3C980284731AE2091C");
+                var renderer=typeof(ScreenSpaceReflections).Assembly.GetType("UnityEngine.Rendering.PostProcessing.ScreenSpaceReflectionsRenderer",true);
+                if(renderer.Module.ModuleVersionId!=new Guid("bb1716ca-81b5-4288-9a04-95ef431a6ddf"))
+                    throw new NotSupportedException("Unsupported native SSR ABI; expected EFT 40743.");
                 bundle=AssetBundle.LoadFromFile(Path.Combine(Path.GetDirectoryName(path),"Assets","stochasticssr"));
                 if(bundle==null)throw new InvalidOperationException("Missing Assets/stochasticssr bundle");
                 var compute=bundle.LoadAsset<ComputeShader>("Assets/HiZ.compute");
@@ -96,12 +95,6 @@ namespace FuckTheseFX.Source.StochasticSSR
         {
             RefreshOpticState();
             return !suspended && settings.Enabled.Value && settings.Optics.Value && opticState.Active && ReferenceEquals(camera,opticState.Camera);
-        }
-        private static void Verify(string file, string expected)
-        {
-            using(var stream=File.OpenRead(file))using(var sha=SHA256.Create())
-                if(BitConverter.ToString(sha.ComputeHash(stream)).Replace("-","")!=expected)
-                    throw new InvalidOperationException("Unsupported SSR ABI: "+file);
         }
         internal void Update()
         {
