@@ -1,5 +1,6 @@
 bin/
 obj/
+/Research/
 .vs/
 native/NRD/vendor/
 research-archive/

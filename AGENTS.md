@@ -14,135 +14,303 @@ Every FuckTheseFX runtime ZIP, including release and testing builds, must be nam
 
 This rule applies to FuckTheseFX runtime packages; separate profiling and research companion plugins retain their own identities.
 
-## Subagent orchestration
+## Subagent orchestration — cost-aware
 
-Use Codex subagents proactively for substantial FTFX development, investigation, auditing, and validation work. Prefer parallel independent investigation over having the primary agent sequentially inspect unrelated subsystems.
+### Objective
 
-The goal is to improve technical depth, catch mistakes independently, and shorten complex investigations—not to generate unnecessary agents or duplicate work.
+Optimize for **successful, validated engineering work per unit of model usage**, not the number of agents, amount of parallelism, or apparent thoroughness.
 
-### When to delegate
+Use the cheapest model that can reliably complete a bounded task. Preserve rendering correctness, production/research boundaries and the quality of the final implementation.
 
-Consider subagents whenever a task involves:
+Subagents are tools for isolating work, not mandatory participants in every task.
 
-- Multiple independent rendering subsystems or source areas.
-- Complex GPU algorithms, numerical correctness, or performance analysis.
-- Investigating bugs with several plausible causes.
-- Changes spanning C#, Unity/HLSL, native D3D11/NRD, and validation infrastructure.
-- Architectural decisions benefiting from independent critical review.
-- Substantial implementation work with separable components.
-- Reviewing a completed implementation for regressions, unsupported assumptions, or missing tests.
+### 1. Primary-agent responsibility
 
-Small, localized, straightforward tasks do not require delegation.
+The primary agent owns:
 
-### Suggested specialization
+- Task interpretation and scope.
+- Architectural decisions and shared interfaces.
+- Decomposition and model selection.
+- Assignment of file ownership.
+- Integration of changes and conflicting findings.
+- Final builds, appropriate validation and delivery.
+- Explicit reporting of what has and has not been verified.
 
-Select relevant specialist roles according to the task rather than automatically spawning every role:
+Before delegating, inspect enough of the relevant code to determine whether the task actually benefits from delegation.
 
-**Rendering / shader investigation**
-- Examine HLSL, compute kernels, Hi-Z traversal, GGX sampling, AO, SSR, GI, denoising inputs, and lighting mathematics.
-- Investigate correctness, coordinate spaces, depth conventions, sampling distributions, numerical stability, and visual artifacts.
-- Distinguish algorithmic limitations from implementation defects.
+Do not automatically spawn agents because a task mentions rendering, shaders, performance or multiple languages.
 
-**Unity / C# integration**
-- Examine camera lifecycle, command buffers, render ordering, resource management, shader bindings, configuration, and Unity/D3D11 interoperability.
-- Verify allocation lifetime, resets, synchronization, and compatibility with the actual Tarkov rendering pipeline.
-- Identify integration problems that isolated shader tests may miss.
+For small, localized changes, work directly.
 
-**Native / NRD integration**
-- Examine native bridge code, ABI contracts, resource formats, motion vectors, radiance packing, hit-distance normalization, and denoiser configuration.
-- Verify D3D11 compatibility and consistency between managed, shader, and native implementations.
+### 2. Model routing
 
-**Validation / GPU performance**
-- Independently inspect test coverage, fixture realism, benchmark methodology, and GPU captures.
-- Look for false-positive tests, incomplete comparisons, measurement contamination, and undocumented assumptions.
-- Distinguish complete frame/GI cost from individual GPU pass timings.
-- Never extrapolate fixture performance into live EFT performance without supporting evidence.
+Use models according to actual task difficulty, not job title.
 
-**Independent adversarial review**
-- Challenge the proposed design or implementation.
-- Search specifically for correctness failures, regressions, concurrency problems, light leaks, feedback loops, history invalidation issues, and misleading diagnostics.
-- Do not merely confirm the primary agent's conclusions.
+**Haiku — default for bounded work**
 
-### Delegation rules
+Prefer Haiku for:
 
-1. Give every subagent a specific objective, relevant files, constraints, and expected deliverables.
-2. Prefer independent, non-overlapping investigations that can run concurrently.
-3. Assign explicit file ownership before delegating implementation. Do not allow concurrent agents to modify the same files or shared contracts without coordination.
-4. Use read-only investigation/review agents when parallel edits cannot be safely isolated.
-5. Do not delegate trivial subtasks merely to increase parallelism.
-6. Avoid recursive or uncontrolled agent spawning.
-7. Require evidence from actual source code, tests, captures, or documented APIs. Hypotheses must be labeled as hypotheses.
-8. Subagents must report relevant file locations, findings, changes, validation performed, unresolved questions, and risks.
-9. The primary agent must review and reconcile subagent findings before integrating changes.
-10. Disagreement between agents is a signal to investigate, not something to resolve by majority vote.
+- Codebase exploration, symbol and dependency discovery.
+- Extracting shader properties or formulas from a specific shader family.
+- Generating manifests, scripts and simple validation tools.
+- Log analysis, test-result summaries and comparisons.
+- Straightforward C#, C++ or HLSL edits with defined contracts.
+- Small bug fixes, mechanical refactors and focused tests.
+- Read-only review of narrow, well-understood changes.
 
-### FTFX-specific constraints
+Haiku is allowed to implement code. Do not artificially restrict it to research-only work.
 
-Subagents must respect the actual renderer architecture:
+**Sonnet — moderately complex engineering**
 
-- Tarkov's Unity rendering pipeline and D3D11 capabilities.
-- Existing XeGTAO, SSR, Contact GI, BroadSSGI, world-cache, and NRD integration contracts.
-- Camera ordering, source capture timing, and feedback prevention.
-- Shader resource formats, dimensions, coordinate spaces, and lifetime.
-- Existing configuration defaults, presets, and opt-in experimental behavior.
-- Existing GPU performance requirements and visual-quality expectations.
+Prefer Sonnet for:
 
-Never assume a native renderer feature, buffer, API, or geometry representation exists merely because it would simplify an implementation.
+- Changes spanning several files or languages.
+- Bounded but nontrivial rendering or shader implementation.
+- Debugging that requires interpreting multiple interacting systems.
+- Integrating results from Haiku investigations.
+- Tests involving moderately complex numerical or stateful behavior.
+- Independent review of changes with meaningful integration risks.
 
-Do not introduce additional render passes, persistent resources, denoisers, CPU/GPU transfers, or external dependencies without a concrete justification.
+**Opus — difficult reasoning and high-risk integration**
 
-Preserve working rendering paths and maintain comparable A/B controls.
+Reserve Opus for:
 
-### Independent verification
+- Renderer architecture and major design tradeoffs.
+- Ambiguous failures after cheaper investigation.
+- CUDA/D3D11 interoperability and synchronization.
+- OptiX acceleration structure and memory-lifetime correctness.
+- NRD signal contracts, temporal reprojection and resource ownership.
+- Nontrivial rendering mathematics with uncertain assumptions.
+- Critical cross-system integration and resolving conflicting findings.
 
-For substantial changes, prefer assigning at least one independent reviewer that did not implement the change.
+Opus should not routinely perform mechanical searches or repeat straightforward investigations already completed by cheaper agents.
 
-Reviewers should actively look for:
+**Do not spawn an Opus subagent without a specific reason.** The primary Opus agent can perform critical integration itself.
 
-- Incorrect mathematical or physical assumptions.
-- Hidden coupling between rendering passes.
-- Shader/C# or shader/native contract mismatches.
-- Invalid depth, motion, normal, or coordinate-space handling.
-- GPU races and resource-state/lifetime errors.
-- Temporal artifacts and inappropriate history reuse.
-- Unexpected allocation or bandwidth overhead.
-- Tests that validate the implementation against itself rather than an independent reference.
-- Regressions in existing rendering modes.
-- Claimed performance improvements unsupported by controlled measurements.
+Model selection is a heuristic, not a claim that Haiku is incapable of difficult work. Escalate based on observed limitations.
 
-A successful build or passing fixture is not proof of visual correctness in EFT.
+### 3. When to delegate
 
-### Validation and integration ownership
+Delegate when at least one condition applies:
 
-The primary agent remains responsible for:
+- Independent exploration would produce substantial intermediate context unnecessary to the primary agent.
+- A narrow implementation can be completed and tested independently.
+- Several genuinely independent questions can be investigated concurrently.
+- A high-risk change needs an independent perspective.
+- The specialist's work has a clear completion condition.
 
-- Overall architecture and integration decisions.
-- Reconciling conflicting findings.
-- Maintaining unchanged behavior outside the requested scope.
-- Running appropriate final builds and regression tests.
-- Ensuring benchmark and capture comparisons are meaningful.
-- Reporting what has and has not been validated.
-- Producing the final testing package when requested.
+Otherwise, work directly.
 
-Do not run competing GPU benchmarks or validation jobs against shared fixture outputs simultaneously. Coordinate those runs or isolate their environments and output paths.
+Do not spawn agents merely to generate plans, restate findings, summarize a few lines, or validate trivial changes.
 
-Subagents must not independently package, install, or deliver runtime builds unless explicitly assigned. All runtime packaging must obey the existing AGENTS.md artifact-naming rules and use the repository's prescribed packaging workflow.
+Do not delegate the same question to multiple agents by default.
 
-### Reporting
+### 4. Task decomposition and context budget
 
-The final response should synthesize the results rather than concatenate subagent reports.
+Prefer **small, independently verifiable work packages** over long-running general-purpose agents.
 
-Summarize:
+A normal subagent assignment should have:
 
-- What was investigated and implemented.
-- Significant findings and architectural decisions.
-- Important issues raised by independent review.
-- Tests and measurements actually completed.
-- Remaining limitations and uncertainty.
-- Files changed and any requested testing artifacts.
+1. One clearly defined objective.
+2. A narrow subsystem or small set of relevant files.
+3. Known interfaces and constraints.
+4. An explicit permitted edit scope.
+5. A concrete deliverable.
+6. A stopping condition.
 
-Be concise but technically specific.
+As a guideline, try to keep Haiku assignments within one narrow implementation or investigation, commonly involving a few files and manageable context.
 
-Never invent validation, claim tests passed without running them, or present theoretical performance improvements as measured results.
+Avoid agents that accumulate hundreds of thousands of tokens while repeatedly investigating unrelated issues.
 
-**Core principle:** Use subagents to investigate independently and challenge assumptions. Keep one accountable primary agent responsible for the correctness, coherence, and performance of the final FTFX implementation.
+Aim to finish an ordinary cheap-agent task well below approximately 50k tokens of accumulated context when practical. This is a soft operating target, not an enforceable accuracy or context limit.
+
+If a task is growing substantially:
+
+- Stop at a coherent checkpoint.
+- Return findings, changed files and remaining work.
+- Have the primary agent divide the remainder into smaller tasks.
+- Use a fresh agent when the previous history is no longer needed.
+
+Resume an existing agent only when retaining its context is genuinely more efficient than a fresh, focused assignment.
+
+Do not repeatedly resume the same agent until its context becomes enormous.
+
+### 5. Delegation instructions
+
+Every delegated task must specify:
+
+**Objective:** What problem to solve.
+
+**Scope:** Relevant files, subsystems, and files that must not change.
+
+**Known context:** Only facts necessary for the task, including required rendering contracts.
+
+**Deliverable:** Exact findings, implementation or test result expected.
+
+**Validation:** What must be checked and what evidence is sufficient.
+
+**Stop condition:** When to return control, including blockers and escalation criteria.
+
+Do not paste entire conversation histories, large previous reports or unrelated source files into delegation prompts.
+
+Give file paths and concise summaries instead.
+
+A subagent must distinguish verified source findings from hypotheses.
+
+### 6. Execution limits
+
+Use these defaults unless the task clearly justifies an exception:
+
+- Start with one subagent.
+- Run at most two independent subagents concurrently.
+- Do not allow subagents to spawn additional subagents.
+- Do not run redundant investigations in parallel.
+- Do not automatically launch a reviewer after every small edit.
+- Do not let multiple implementation agents modify the same files or shared contracts concurrently.
+- Do not let different agents run competing GPU workloads against the same device, capture set or outputs.
+
+Prefer serial execution when tasks have dependencies.
+
+Parallel work is useful only when independence is real and the combined work is cheaper or meaningfully faster.
+
+Do not use agent teams or recursive orchestration unless explicitly requested or independently justified.
+
+### 7. Escalation policy
+
+A cheap agent should stop and return a blocker when:
+
+- The task requires a significant architectural change not in scope.
+- Critical assumptions cannot be verified.
+- The implementation requires changing shared GPU/ABI contracts unexpectedly.
+- Repeated attempts fail for reasons the agent cannot explain.
+- Continuing requires extensive unrelated investigation.
+- It discovers a material synchronization, numerical or lifetime risk.
+
+The primary agent decides whether to:
+
+- Clarify the task and retry with Haiku.
+- Assign a more capable Sonnet agent.
+- Resolve the issue directly with Opus.
+- Defer the issue as unrelated.
+
+Do not promote every uncertainty immediately to Opus.
+
+Do not allow an agent to expand its assignment indefinitely to work around a blocker.
+
+### 8. Implementation ownership
+
+Implementation agents must respect explicit file ownership.
+
+Prefer one agent implementing a shared feature end to end when several tightly coupled files are involved.
+
+Parallelize independent extraction, test generation and read-only research instead of having several agents simultaneously modify common renderer code.
+
+The primary agent owns shared-interface changes and final integration.
+
+Subagents must not independently install, package or publish builds unless explicitly assigned.
+
+Preserve existing working behavior and A/B controls.
+
+### 9. Risk-proportionate validation
+
+Validation depends on the consequence of an error.
+
+**Low risk**
+
+Examples: documentation, manifests, narrow data extraction, simple configuration changes and mechanical transformations.
+
+Use direct checks, build validation or relevant tests. Independent agent review is optional.
+
+**Moderate risk**
+
+Examples: material decoding, texture-atlas logic, ordinary shaders, scene collection and bounded rendering features.
+
+Use targeted tests and an independent Sonnet review when the change has meaningful correctness or integration risks.
+
+**High risk**
+
+Examples: CUDA/D3D11 synchronization, memory/resource lifetime, OptiX GAS/IAS ownership, NRD ABI and signal contracts, temporal history, asynchronous packet retirement and major shared shader contracts.
+
+Require appropriate independent verification and direct primary-agent review. Escalate to Opus-level reasoning when necessary.
+
+Reviewers must focus on plausible defects in the actual change, not perform another open-ended project audit.
+
+A review should return actionable findings, not a lengthy restatement of the implementation.
+
+A review that finds no significant issues is a valid result. Do not manufacture additional work to justify the review.
+
+### 10. FTFX-specific invariants
+
+All agents must respect:
+
+- Unity 2022 / EFT D3D11 rendering capabilities and limitations.
+- Existing XeGTAO, SSR, GI, NRD and CustomAmbient contracts.
+- Correct camera ordering, feedback prevention and GPU synchronization.
+- Explicit resource ownership, retirement and generation lifetimes.
+- Correct depth, motion, normal, colour-space and coordinate conventions.
+- Existing configuration defaults and opt-in experimental paths.
+- Current known-good implementations and comparison modes.
+- Production versus isolated research boundaries.
+- Protected input files and existing research evidence.
+
+Never assume a renderer buffer, API, live geometry source or shader capability exists without evidence.
+
+Do not introduce substantial additional render passes, allocations, readbacks or dependencies without justification.
+
+Do not weaken critical correctness or resource-lifetime safeguards in pursuit of lower inference cost.
+
+### 11. GPU testing and performance
+
+GPU tests, EFT captures and benchmarks must be coordinated by the primary agent.
+
+Do not run competing GPU jobs simultaneously when they can interfere with measurement or shared state.
+
+Prefer small targeted fixtures before long live captures.
+
+Distinguish:
+
+- Offline correctness.
+- Native/Unity fixture success.
+- Actual live EFT visual behavior.
+- Isolated GPU timing.
+- Complete incremental GPU envelope.
+- Whole-game performance.
+
+Do not present theoretical savings as measured results.
+
+Avoid running exhaustive benchmarks without a specific question they are intended to answer.
+
+### 12. Subagent reporting
+
+Subagents should return concise, decision-useful results.
+
+Default report:
+
+- **Result:** Completed, partial or blocked.
+- **Finding/change:** What was established or modified.
+- **Evidence:** Key file paths, source locations and tests.
+- **Risks:** Important unresolved problems only.
+- **Next action:** One concrete recommendation, if required.
+
+Prefer a few paragraphs or a short structured summary. Return lengthy documentation only when explicitly requested.
+
+Do not return full logs, giant source dumps, repeated build output or entire investigation transcripts.
+
+The primary agent synthesizes results instead of concatenating agent reports.
+
+### 13. Stop discipline
+
+Once the requested behavior is implemented and appropriately validated, stop.
+
+Do not automatically begin:
+
+- Adjacent rendering improvements.
+- New architecture proposals.
+- Additional exploratory audits.
+- Broader refactoring.
+- Performance optimizations unrelated to the task.
+- Another work package.
+
+Report worthwhile follow-up ideas without implementing them unless authorized.
+
+**Core principle: One accountable primary agent, small bounded cheap agents, targeted verification and no unnecessary work. Optimize for delivered results, not agent activity.**
