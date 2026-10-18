@@ -33,7 +33,19 @@ namespace FuckTheseFX.Source.Sharpen
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
             cameraEffects.Clear();
-            ApplyConfiguredState();
+            disabledByPlugin.RemoveWhere(effect => effect == null);
+            if (Plugin.SharpenEnabled.Value) { Restore(); return; }
+            if (!scene.IsValid() || !scene.isLoaded) return;
+
+            var roots = new List<GameObject>(scene.rootCount);
+            var effects = new List<CC_Sharpen>();
+            scene.GetRootGameObjects(roots);
+            foreach (GameObject root in roots)
+            {
+                if (root == null) continue;
+                root.GetComponentsInChildren(true, effects);
+                foreach (CC_Sharpen effect in effects) DisableAndRemember(effect);
+            }
         }
 
         private void OnCameraPreCull(Camera camera)

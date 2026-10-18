@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
-using System.Security.Cryptography;
 using HarmonyLib;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -17,7 +16,6 @@ namespace FuckTheseFX.Source.Water
     // Substitute the two native material loads, never the draws or settings blocks.
     internal sealed class WaterSurfaceIntegration : IDisposable
     {
-        private const string AssetsHash="266A9AD217731AC3953E6603BDD5D8648F143DCEE976C76A4783C74891876550";
         private static WaterSurfaceIntegration active;
         private Harmony harmony;
         private AssetBundle bundle;
@@ -42,10 +40,6 @@ namespace FuckTheseFX.Source.Water
                     throw new NotSupportedException("Water surface requires the pinned D3D11/Gamma path.");
                 if(typeof(WaterRendererv3).Module.ModuleVersionId!=new Guid("cc2d80b0-6d5b-4cb1-a581-6d2cc901d4c7"))
                     throw new NotSupportedException("Unsupported EFT water ABI; expected EFT 40743.");
-                using(var stream=File.OpenRead(Path.Combine(Application.dataPath,"sharedassets15.assets")))
-                using(var sha=SHA256.Create())
-                    if(BitConverter.ToString(sha.ComputeHash(stream)).Replace("-","")!=AssetsHash)
-                        throw new NotSupportedException("Unsupported native water shader assets.");
                 managerField=AccessTools.Field(typeof(WaterRendererv3),"commandBufferManager");
                 if(managerField==null || managerField.FieldType!=typeof(CommandBufferManager)) throw new MissingFieldException("WaterRendererv3.commandBufferManager");
                 var method=AccessTools.DeclaredMethod(typeof(WaterRendererv3),"method_2",new[]{typeof(Camera)});

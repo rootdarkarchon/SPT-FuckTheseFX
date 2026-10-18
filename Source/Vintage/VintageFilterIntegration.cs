@@ -36,7 +36,24 @@ namespace FuckTheseFX.Source.Vintage
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
             cameraEffects.Clear();
-            ApplyConfiguredStateToLoadedEffects();
+            disabledByPlugin.RemoveWhere(effect => effect == null);
+            if (Plugin.VintageEnabled.Value)
+            {
+                RestoreRememberedEffects();
+                return;
+            }
+            if (!scene.IsValid() || !scene.isLoaded) return;
+
+            var roots = new List<GameObject>(scene.rootCount);
+            var effects = new List<CC_Vintage>();
+            scene.GetRootGameObjects(roots);
+            foreach (GameObject root in roots)
+            {
+                if (root == null) continue;
+                root.GetComponentsInChildren(true, effects);
+                foreach (CC_Vintage effect in effects)
+                    DisableAndRemember(effect);
+            }
         }
 
         private void OnCameraPreCull(Camera camera)

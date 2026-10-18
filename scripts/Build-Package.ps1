@@ -36,6 +36,7 @@ $assets = @('distantshadows','occlusion','stochasticssr','water')
 & dotnet build (Join-Path $repo 'FuckTheseFX.csproj') -c Release "-p:SptInstallPath=$SptInstallPath" --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
 if (-not $SkipVerification) {
+& (Join-Path $PSScriptRoot 'Test-StartupInitialization.ps1') -SptInstallPath $SptInstallPath
 & (Join-Path $PSScriptRoot 'Test-Configuration.ps1') -SptInstallPath $SptInstallPath
 & (Join-Path $PSScriptRoot 'Test-OcclusionContracts.ps1') -SptInstallPath $SptInstallPath
 & (Join-Path $PSScriptRoot 'Test-ColorBleedContracts.ps1') -SptInstallPath $SptInstallPath

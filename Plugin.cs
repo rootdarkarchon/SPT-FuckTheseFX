@@ -19,7 +19,7 @@ namespace FuckTheseFX
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Guid = "com.rootdarkarchon.fuckthesefx";
-        public const string Version = "1.8.8";
+        public const string Version = "1.8.10";
         internal static ManualLogSource MyLog;
         internal static ConfigEntry<bool> AmbientHighlightEnabled, DistantShadowSamplingEnabled;
         internal static ConfigEntry<bool> DistantShadowsEnabled;
@@ -51,8 +51,11 @@ namespace FuckTheseFX
 
         private void Awake()
         {
+            var startup = System.Diagnostics.Stopwatch.StartNew();
             MyLog = Logger;
+            var settingsTimer = System.Diagnostics.Stopwatch.StartNew();
             BindSettings(Config);
+            FeatureStartup.Report("settings", settingsTimer);
             highlight = new AmbientHighlightIntegration();
             bloom = new BloomResolutionIntegration();
             sampling = new DistantShadowSamplingIntegration();
@@ -77,10 +80,25 @@ namespace FuckTheseFX
             FeatureStartup.TryInitialize("Distant shadow resolution", resolution.Initialize);
             occlusion = new XeGTAOIntegration(Info.Location, Occlusion);
             FeatureStartup.TryInitialize("XeGTAO", occlusion.Initialize);
+            FeatureStartup.Report("Awake total", startup);
         }
 
         internal static SettingsCatalog Settings;
         internal static void BindSettings(ConfigFile config)
+        {
+            // BepInEx saves the growing file after every newly bound entry.
+            // Register the complete catalog before its one startup save.
+            bool save = config.SaveOnConfigSet;
+            config.SaveOnConfigSet = false;
+            try
+            {
+                BindSettingsCore(config);
+                if (save) config.Save();
+            }
+            finally { config.SaveOnConfigSet = save; }
+        }
+
+        private static void BindSettingsCore(ConfigFile config)
         {
             var catalog = new SettingsCatalog(config);
             catalog.BindPresets();
