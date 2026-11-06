@@ -23,7 +23,7 @@ namespace FuckTheseFX
             { Section = section; Key = key; Default = value; Description = description; Advanced = advanced; Bounds = bounds; }
         }
         private static readonly Definition[] Definitions = {
-            new Definition("1. Vanilla Optimizations", "Streets of Tarkov Glass Culling Fix", true, "Only active on Streets of Tarkov. Makes omitted glass follow native culling of vehicle parts, windows and enclosing building sections to improve performance. Inactive on all other maps. Off restores normal glass rendering.", false),
+            new Definition("1. Vanilla Optimizations", "Streets of Tarkov Glass Culling Fix", true, "Only active on Streets of Tarkov. Makes omitted glass follow native culling of vehicle parts, windows and enclosing building sections to improve performance. Inactive on all other maps, and bypassed while FuckThisCulling's Enable HiZ culling is on (Hi-Z culls this glass itself). Off restores normal glass rendering.", false),
             new Definition("1. Vanilla Optimizations", "Additional Ambient Highlight", true, "When enabled uses vanilla Tarkovs behavior: Adds extra ambient brightness to weapons, hands and selected objects. Off removes this artificial glow. Performance: no measurable impact.", false),
             new Definition("1. Vanilla Optimizations", "Vintage Filter", true, "Off disables the vintage camera filter. On restores effects disabled by Fuck These FX. Performance: no measurable impact.", false),
             new Definition("1. Vanilla Optimizations", "Sharpen Filter", true, "On retains Tarkov's CC_Sharpen filter. Off removes the filter, including its combined desaturation. Applies live; enabling restores only effects disabled by Fuck These FX.", false),

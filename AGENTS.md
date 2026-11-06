@@ -314,3 +314,13 @@ Do not automatically begin:
 Report worthwhile follow-up ideas without implementing them unless authorized.
 
 **Core principle: One accountable primary agent, small bounded cheap agents, targeted verification and no unnecessary work. Optimize for delivered results, not agent activity.**
+
+## Persisted contracts
+
+FuckThisCulling (`com.rootdarkarchon.fuckthisculling`) reads these members by reflection, read-only (`src/FuckThisCulling/Interop/FtfxActorMask.cs`, `ActorMask.cs`). Chain, starting from `Chainloader.PluginInfos["com.rootdarkarchon.fuckthesefx"].Instance` (`Plugin.Guid`):
+
+- `Plugin.occlusion` (instance field, `XeGTAOIntegration`) → `XeGTAOIntegration.bindings` (instance field, `Dictionary<CameraManager,Binding>`).
+- `Binding.Camera` (`Camera`) and `Binding.Effect` (`CameraOcclusion`).
+- `CameraOcclusion.actorMask` (instance field, `RenderTexture`) and `CameraOcclusion.Active` (property getter, `bool`).
+
+Renaming or retyping any of these breaks FTC's actor mask; FTC then fails open to its own pass. Keep the names or update FTC in the same change. FTC never writes these members or the texture.

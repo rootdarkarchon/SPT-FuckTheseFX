@@ -53,6 +53,7 @@ namespace FuckTheseFX
     {
         internal static TestLog MyLog = new TestLog();
         internal static Setting<bool> GlassCullingEnabled = new Setting<bool>();
+        internal static bool HiZCullingEnabled;
     }
 }
 // Small game fixtures model the installed IL contracts; the production code uses the real types.
@@ -271,6 +272,11 @@ public static class GlassCullingValidation
             WindowsManager.Instance = root.AddComponent<WindowsManager>(); feature.Update(); Check(!glass.forceRenderingOff, "Windows manager bypass restores");
             Object.DestroyImmediate(WindowsManager.Instance); WindowsManager.Instance = null; feature.Update(); Discover(feature);
             Check(glass.forceRenderingOff, "Manager removal rediscovers");
+            Plugin.HiZCullingEnabled = true; feature.Update(); Check(!glass.forceRenderingOff, "FuckThisCulling Hi-Z bypass restores");
+            group.Toggle(true); group.Toggle(false); Discover(feature);
+            Check(!glass.forceRenderingOff, "Hi-Z bypass ignores native callbacks and discovery");
+            Plugin.HiZCullingEnabled = false; feature.Update(); Discover(feature);
+            Check(glass.forceRenderingOff, "Hi-Z disable rediscovers");
             game.Status = GameStatus.Stopping; feature.Update(); Discover(feature);
             Check(!glass.forceRenderingOff, "Raid end releases suppression and prevents rediscovery");
             var newWorld = new GameObject("next map world"); newWorld.transform.SetParent(root.transform);

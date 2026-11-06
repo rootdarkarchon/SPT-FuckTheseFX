@@ -110,7 +110,7 @@ namespace FuckTheseFX.Source.Occlusion
                 if(binding.Camera != camera) continue;
                 bool enabled = settings.Enabled.Value && binding.Mode != ESSAOMode.Off && !binding.Failed &&
                     Time.unscaledTime >= resumeAt && GpuAssets.Supports(camera);
-                if(!enabled) { binding.Restore(); ambient.Restore(); continue; }
+                if(!enabled) { binding.Restore(); ambient.Restore(camera); continue; }
                 try
                 {
                     if(binding.Effect == null) binding.Effect = new CameraOcclusion(camera,assets);
@@ -122,7 +122,7 @@ namespace FuckTheseFX.Source.Occlusion
                 }
                 catch(Exception error)
                 {
-                    binding.Restore(); binding.Failed = true; ambient.Restore(); diagnostic = null;
+                    binding.Restore(); binding.Failed = true; ambient.Restore(camera); diagnostic = null;
                     Plugin.MyLog.LogError("XeGTAO camera failed; native AO restored. Toggle XeGTAO off/on to retry. "+error);
                 }
             }

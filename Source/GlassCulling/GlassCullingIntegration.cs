@@ -21,7 +21,7 @@ namespace FuckTheseFX.Source.GlassCulling
         private readonly Dictionary<PerfectCullingBakeGroup, List<GlassCullingFamily>> byGroup =
             new Dictionary<PerfectCullingBakeGroup, List<GlassCullingFamily>>();
         private IEnumerator<bool> scan;
-        private bool initialized, enabled, pending, failed, managerPresent;
+        private bool initialized, enabled, pending, failed, managerPresent, hiZPresent;
         private float scanAfter;
         private int auditCursor;
         private float nextAuditAt;
@@ -64,13 +64,17 @@ namespace FuckTheseFX.Source.GlassCulling
             bool requested = Plugin.GlassCullingEnabled.Value && !failed && ready;
             // A manager can be introduced at runtime without a scene load. Never compete with it.
             bool manager = WindowsManager.Instance && WindowsManager.Instance.isActiveAndEnabled;
-            if (enabled != requested || managerPresent != manager)
+            // FuckThisCulling Hi-Z owns pane visibility and captures it during preparation; following
+            // frozen Perfect Culling flags would hold its panes externally force-off.
+            bool hiZ = Plugin.HiZCullingEnabled;
+            if (enabled != requested || managerPresent != manager || hiZPresent != hiZ)
             {
-                enabled = requested; managerPresent = manager;
+                enabled = requested; managerPresent = manager; hiZPresent = hiZ;
                 Invalidate();
                 if (enabled && managerPresent) Plugin.MyLog.LogInfo("Glass culling: bypassed while WindowsManager is active.");
+                else if (enabled && hiZPresent) Plugin.MyLog.LogInfo("Glass culling: bypassed while FuckThisCulling Hi-Z culling is enabled.");
             }
-            if (!enabled || managerPresent) return;
+            if (!enabled || managerPresent || hiZPresent) return;
             try
             {
                 if (pending && Time.realtimeSinceStartup >= scanAfter)
@@ -96,7 +100,7 @@ namespace FuckTheseFX.Source.GlassCulling
         private static void GroupChanged(PerfectCullingBakeGroup __instance)
         {
             var self = instance;
-            if (self == null || !self.enabled || self.managerPresent || self.failed) return;
+            if (self == null || !self.enabled || self.managerPresent || self.hiZPresent || self.failed) return;
             try
             {
                 if (self.byGroup.TryGetValue(__instance, out var affected))

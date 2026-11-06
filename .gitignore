@@ -7,3 +7,5 @@ research-archive/
 __pycache__/
 *.py[cod]
 
+.kata.local.toml
+.kata.toml

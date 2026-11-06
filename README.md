@@ -55,6 +55,8 @@ Turn debug views back to **Normal** and disable captures before comparing perfor
 
 The [documentation index](docs/README.md) links to effect guides, troubleshooting comparisons and developer build instructions.
 
+Pixel-locked scope rendering and the temporal frame capture moved to [SPT-FuckTheseOptics](https://github.com/rootdarkarchon/SPT-FuckTheseOptics).
+
 For a bug report, include your SPT/EFT and FTFX versions, map, graphics settings, selected preset or changed settings, and steps to reproduce. Attach the relevant BepInEx log and screenshots when they help show the issue. Submit reports through [GitHub Issues](https://github.com/rootdarkarchon/SPT-FuckTheseFX/issues).
 
 ## License and credits

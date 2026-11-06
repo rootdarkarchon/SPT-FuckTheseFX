@@ -19,7 +19,7 @@ namespace FuckTheseFX
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Guid = "com.rootdarkarchon.fuckthesefx";
-        public const string Version = "1.8.10";
+        public const string Version = "1.9.0";
         internal static ManualLogSource MyLog;
         internal static ConfigEntry<bool> AmbientHighlightEnabled, DistantShadowSamplingEnabled;
         internal static ConfigEntry<bool> DistantShadowsEnabled;
@@ -131,6 +131,25 @@ namespace FuckTheseFX
             Ssr = new SsrSettings(catalog);
             catalog.ValidateBindings();
             Settings = catalog;
+        }
+
+        private const string HiZCullingGuid = "com.rootdarkarchon.fuckthisculling";
+        private static ConfigEntry<bool> hiZCullingSetting;
+        private static bool hiZCullingResolved;
+        // FuckThisCulling's persisted "Controls/EnableHiZCulling" covers preparation, active Hi-Z and
+        // its fail-open path (a runtime failure clears it). Resolved once, after every plugin Awake.
+        internal static bool HiZCullingEnabled
+        {
+            get
+            {
+                if (!hiZCullingResolved)
+                {
+                    hiZCullingResolved = true;
+                    if (BepInEx.Bootstrap.Chainloader.PluginInfos.TryGetValue(HiZCullingGuid, out var info) && info.Instance != null)
+                        info.Instance.Config.TryGetEntry("Controls", "EnableHiZCulling", out hiZCullingSetting);
+                }
+                return hiZCullingSetting != null && hiZCullingSetting.Value;
+            }
         }
 
         private void Update()

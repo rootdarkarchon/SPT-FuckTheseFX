@@ -73,4 +73,46 @@ public static partial class OcclusionValidation
   }
   results.Add("PASS: actual ambient draw UAV capture, simultaneous reflection/debug UAVs, research wrapper preserved in both patch installation orders, independent Normal-view bypass and cleanup.");
  }
+ // AmbientLight records every camera with one shared material. An optic RT resize re-records the ineligible optic
+ // camera after the main camera; that must not change which shader the main camera's recorded draw uses.
+ private static void AmbientCameraIsolation(GpuAssets assets)
+ {
+  var main=Scene(64,64,out var mainTarget,out var mainGeometry);
+  var optic=Scene(48,48,out var opticTarget,out var opticGeometry);
+  var stand=UnityEditor.AssetDatabase.LoadAssetAtPath<Shader>("Assets/Editor/NativeAmbientFixture.shader");
+  Require(stand!=null && stand.name=="Hidden/WriteScreenAmbient" && !UnityEditor.ShaderUtil.ShaderHasError(stand),"native ambient stand-in shader");
+  var material=new Material(stand);
+  var mesh=new Mesh{vertices=new[]{new Vector3(-1,-1,.1f),new Vector3(1,-1,.1f),new Vector3(-1,1,.1f),new Vector3(1,1,.1f)},triangles=new[]{0,1,3,3,2,0}};
+  var native=new AmbientLight(material){Quad=mesh};var mainSettings=new AmbientLight.CamSettings();var opticSettings=new AmbientLight.CamSettings();
+  var settings=new OcclusionSettings(new BepInEx.Configuration.ConfigFile(System.IO.Path.GetFullPath("ambient-isolation.cfg"),false){SaveOnConfigSet=false});
+  var hook=AccessTools.Method(typeof(AmbientLight),nameof(AmbientLight.InitAmbientBuffer));
+  var bridge=new AmbientOcclusionBridge(assets.Ambient,settings,c=>c==main);
+  var instanceField=AccessTools.Field(typeof(AmbientOcclusionBridge),"instance");instanceField.SetValue(null,bridge);
+  var owner=new Harmony("ftfx.ambient.isolation.test");
+  Func<Color,bool> green=c=>Mathf.Abs(c.r)<.001f && Mathf.Abs(c.g-1)<.001f && Mathf.Abs(c.b)<.001f;
+  try
+  {
+   owner.Patch(hook,transpiler:new HarmonyMethod(typeof(AmbientOcclusionBridge),"InstrumentDraw"));
+   Shader.SetGlobalFloat("_SrcBlend",1);Shader.SetGlobalFloat("_DstBlend",1);
+   main.AddCommandBuffer(CameraEvent.AfterLighting,mainSettings.CbAmbient);optic.AddCommandBuffer(CameraEvent.AfterLighting,opticSettings.CbAmbient);
+   native.InitAmbientBuffer(mainSettings,main);native.InitAmbientBuffer(opticSettings,optic);
+   optic.Render();main.Render();
+   Require(green(Read(opticTarget)),"ineligible camera did not draw the native ambient shader: "+Read(opticTarget));
+   Require(!green(Read(mainTarget)),"recording an ineligible camera reverted the eligible camera's ambient shader");
+   Require(material.shader==stand,"shared native ambient material was modified");
+   bridge.Restore(optic);main.Render();
+   Require(!green(Read(mainTarget)),"restoring another camera reverted the eligible camera");
+   bridge.Restore(main);main.Render();
+   Require(green(Read(mainTarget)),"restored camera did not return to the native ambient shader: "+Read(mainTarget));
+  }
+  finally
+  {
+   owner.UnpatchSelf();instanceField.SetValue(null,null);bridge.Dispose();
+   main.RemoveCommandBuffer(CameraEvent.AfterLighting,mainSettings.CbAmbient);optic.RemoveCommandBuffer(CameraEvent.AfterLighting,opticSettings.CbAmbient);
+   mainSettings.CbAmbient.Dispose();opticSettings.CbAmbient.Dispose();
+   UnityEngine.Object.DestroyImmediate(material);UnityEngine.Object.DestroyImmediate(mesh);
+   DestroyScene(main,mainTarget,mainGeometry);DestroyScene(optic,opticTarget,opticGeometry);
+  }
+  results.Add("PASS: ambient material isolation; recording or restoring an ineligible camera leaves the eligible camera's draw and the shared native material unchanged.");
+ }
 }

@@ -56,6 +56,41 @@ namespace FuckTheseFX.Source.StochasticSSR
         private readonly Material support;
         private readonly Mesh triangle;
         private readonly MaterialPropertyBlock properties=new MaterialPropertyBlock();
+        private static readonly int SsrLateRasterId=Shader.PropertyToID("_SsrLateRaster");
+        private static readonly int SsrRasterStateId=Shader.PropertyToID("_SsrRasterState");
+        private static readonly int ProjectionId=Shader.PropertyToID("_Projection");
+        private static readonly int InverseProjectionId=Shader.PropertyToID("_InverseProjection");
+        private static readonly int WorldToViewId=Shader.PropertyToID("_WorldToView");
+        private static readonly int SizeId=Shader.PropertyToID("_Size");
+        private static readonly int TraceId=Shader.PropertyToID("_Trace");
+        private static readonly int ClipId=Shader.PropertyToID("_Clip");
+        private static readonly int FrameId=Shader.PropertyToID("_Frame");
+        private static readonly int EdgePixelsId=Shader.PropertyToID("_EdgePixels");
+        private static readonly int ThicknessConfidenceFloorId=Shader.PropertyToID("_ThicknessConfidenceFloor");
+        private static readonly int EndpointSkyFallbackId=Shader.PropertyToID("_EndpointSkyFallback");
+        private static readonly int ContinuationId=Shader.PropertyToID("_Continuation");
+        private static readonly int ZeroSmoothnessProbeId=Shader.PropertyToID("_ZeroSmoothnessProbe");
+        private static readonly int DepthOptionsId=Shader.PropertyToID("_DepthOptions");
+        private static readonly int FTFXSSR_RawDepthId=Shader.PropertyToID("_FTFXSSR_RawDepth");
+        private static readonly int DepthPreviousId=Shader.PropertyToID("_DepthPrevious");
+        private static readonly int DepthOutputId=Shader.PropertyToID("_DepthOutput");
+        private static readonly int HiZ0Id=Shader.PropertyToID("_HiZ0");
+        private static readonly int NormalsId=Shader.PropertyToID("_Normals");
+        private static readonly int SpecularId=Shader.PropertyToID("_Specular");
+        private static readonly int BlueNoiseId=Shader.PropertyToID("_BlueNoise");
+        private static readonly int SceneId=Shader.PropertyToID("_Scene");
+        private static readonly int RadianceOutputId=Shader.PropertyToID("_RadianceOutput");
+        private static readonly int HitOutputId=Shader.PropertyToID("_HitOutput");
+        private static readonly int PointOutputId=Shader.PropertyToID("_PointOutput");
+        private static readonly int RecordOutputId=Shader.PropertyToID("_RecordOutput");
+        private static readonly int TraceInfoId=Shader.PropertyToID("_TraceInfo");
+        private static readonly int TraceStopId=Shader.PropertyToID("_TraceStop");
+        private static readonly int DepthHitId=Shader.PropertyToID("_DepthHit");
+        private static readonly int SampleOutputId=Shader.PropertyToID("_SampleOutput");
+        private static readonly int WaterSurfaceId=Shader.PropertyToID("_WaterSurface");
+        private static readonly int MainTexId=Shader.PropertyToID("_MainTex");
+        private static readonly int[] HiZIds=CreateHiZIds();
+        private static int[] CreateHiZIds(){var ids=new int[14];for(int i=0;i<ids.Length;i++)ids[i]=Shader.PropertyToID("_HiZ"+i);return ids;}
         private readonly int reduceKernel,traceKernel,continuedSkyKernel;
         private readonly int traceGroupWidth,traceGroupHeight;
 
@@ -151,58 +186,58 @@ namespace FuckTheseFX.Source.StochasticSSR
             }
             int w=CameraWidth,h=CameraHeight;var projection=GL.GetGPUProjectionMatrix(camera.projectionMatrix,false);
             if(Raster.Enabled)compute.EnableKeyword("FTFX_LATE_RASTER");else compute.DisableKeyword("FTFX_LATE_RASTER");
-            cb.SetComputeFloatParam(compute,"_SsrLateRaster",Raster.Enabled?1:0);
-            cb.SetComputeBufferParam(compute,traceKernel,"_SsrRasterState",Raster.Buffer);
-            cb.SetComputeMatrixParam(compute,"_Projection",projection);cb.SetComputeMatrixParam(compute,"_InverseProjection",projection.inverse);cb.SetComputeMatrixParam(compute,"_WorldToView",camera.worldToCameraMatrix);
-            cb.SetComputeVectorParam(compute,"_Size",new Vector4(w,h,Radiance.width,Radiance.height));
-            cb.SetComputeVectorParam(compute,"_Trace",new Vector4(0,o.Thickness,o.Smoothness,o.Steps));
-            cb.SetComputeVectorParam(compute,"_Clip",new Vector4(camera.nearClipPlane,camera.farClipPlane,Depth.Count-1,0));
+            cb.SetComputeFloatParam(compute,SsrLateRasterId,Raster.Enabled?1:0);
+            cb.SetComputeBufferParam(compute,traceKernel,SsrRasterStateId,Raster.Buffer);
+            cb.SetComputeMatrixParam(compute,ProjectionId,projection);cb.SetComputeMatrixParam(compute,InverseProjectionId,projection.inverse);cb.SetComputeMatrixParam(compute,WorldToViewId,camera.worldToCameraMatrix);
+            cb.SetComputeVectorParam(compute,SizeId,new Vector4(w,h,Radiance.width,Radiance.height));
+            cb.SetComputeVectorParam(compute,TraceId,new Vector4(0,o.Thickness,o.Smoothness,o.Steps));
+            cb.SetComputeVectorParam(compute,ClipId,new Vector4(camera.nearClipPlane,camera.farClipPlane,Depth.Count-1,0));
             LastSamplePhase=o.Freeze?0:sampleIndex++;
-            cb.SetComputeIntParam(compute,"_Frame",LastSamplePhase);
-            cb.SetComputeFloatParam(compute,"_EdgePixels",o.EdgePixels);
-            cb.SetComputeFloatParam(compute,"_ThicknessConfidenceFloor",o.ThicknessConfidenceFloor);
-            cb.SetComputeIntParam(compute,"_EndpointSkyFallback",o.EndpointSkyFallback?1:0);
-            cb.SetComputeVectorParam(compute,"_Continuation",new Vector4(o.ContinuationSamples,o.ContinuationPixels,o.ContinuationDepth,0));
-            cb.SetComputeIntParam(compute,"_ZeroSmoothnessProbe",o.ZeroSmoothnessProbe?1:0);
+            cb.SetComputeIntParam(compute,FrameId,LastSamplePhase);
+            cb.SetComputeFloatParam(compute,EdgePixelsId,o.EdgePixels);
+            cb.SetComputeFloatParam(compute,ThicknessConfidenceFloorId,o.ThicknessConfidenceFloor);
+            cb.SetComputeIntParam(compute,EndpointSkyFallbackId,o.EndpointSkyFallback?1:0);
+            cb.SetComputeVectorParam(compute,ContinuationId,new Vector4(o.ContinuationSamples,o.ContinuationPixels,o.ContinuationDepth,0));
+            cb.SetComputeIntParam(compute,ZeroSmoothnessProbeId,o.ZeroSmoothnessProbe?1:0);
             using(SsrGpuSample.Measure(cb,camera,"HiZ build")) {
-                properties.Clear();properties.SetBuffer("_SsrRasterState",Raster.Buffer);properties.SetFloat("_SsrLateRaster",Raster.Enabled?1:0);properties.SetMatrix("_InverseProjection",projection.inverse);properties.SetVector("_Size",new Vector4(w,h,0,0));
-                properties.SetVector("_DepthOptions",new Vector4(camera.nearClipPlane,camera.farClipPlane,SystemInfo.usesReversedZBuffer?1:0,rawDepth.HasValue?1:0));
-                cb.SetGlobalTexture("_FTFXSSR_RawDepth",rawDepth??new RenderTargetIdentifier(Texture2D.blackTexture));Draw(cb,source,Depth[0],1);
+                properties.Clear();properties.SetBuffer(SsrRasterStateId,Raster.Buffer);properties.SetFloat(SsrLateRasterId,Raster.Enabled?1:0);properties.SetMatrix(InverseProjectionId,projection.inverse);properties.SetVector(SizeId,new Vector4(w,h,0,0));
+                properties.SetVector(DepthOptionsId,new Vector4(camera.nearClipPlane,camera.farClipPlane,SystemInfo.usesReversedZBuffer?1:0,rawDepth.HasValue?1:0));
+                cb.SetGlobalTexture(FTFXSSR_RawDepthId,rawDepth??new RenderTargetIdentifier(Texture2D.blackTexture));Draw(cb,source,Depth[0],1);
                 for(int i=1;i<Depth.Count;i++) {
-                    cb.SetComputeTextureParam(compute,reduceKernel,"_DepthPrevious",Depth[i-1]);cb.SetComputeTextureParam(compute,reduceKernel,"_DepthOutput",Depth[i]);
+                    cb.SetComputeTextureParam(compute,reduceKernel,DepthPreviousId,Depth[i-1]);cb.SetComputeTextureParam(compute,reduceKernel,DepthOutputId,Depth[i]);
                     cb.DispatchCompute(compute,reduceKernel,(Depth[i].width+7)/8,(Depth[i].height+7)/8,1);
                 }
             }
             var water=WaterReflectionCapture.Get(camera,w,h);
             using(SsrGpuSample.Measure(cb,camera,"HiZ trace")) {
-                for(int i=0;i<14;i++)cb.SetComputeTextureParam(compute,traceKernel,"_HiZ"+i,Depth[Math.Min(i,Depth.Count-1)]);
-                cb.SetComputeTextureParam(compute,traceKernel,"_Normals",normals??new RenderTargetIdentifier(BuiltinRenderTextureType.GBuffer2));
-                cb.SetComputeTextureParam(compute,traceKernel,"_Specular",specular??new RenderTargetIdentifier(BuiltinRenderTextureType.GBuffer1));
-                cb.SetComputeTextureParam(compute,traceKernel,"_BlueNoise",noise);cb.SetComputeTextureParam(compute,traceKernel,"_Scene",source);
-                cb.SetComputeTextureParam(compute,traceKernel,"_RadianceOutput",Radiance);cb.SetComputeTextureParam(compute,traceKernel,"_HitOutput",Hit);
-                cb.SetComputeTextureParam(compute,traceKernel,"_PointOutput",HitPoint);cb.SetComputeTextureParam(compute,traceKernel,"_RecordOutput",Record);
-                cb.SetComputeTextureParam(compute,traceKernel,"_TraceInfo",TraceInfo);
-                if(rejectionDiagnostics)cb.SetComputeTextureParam(compute,traceKernel,"_TraceStop",TraceStop);
-                if(diagnostics)cb.SetComputeTextureParam(compute,traceKernel,"_DepthHit",DepthHit);
-                if(diagnostics)cb.SetComputeTextureParam(compute,traceKernel,"_SampleOutput",Sample);
+                for(int i=0;i<HiZIds.Length;i++)cb.SetComputeTextureParam(compute,traceKernel,HiZIds[i],Depth[Math.Min(i,Depth.Count-1)]);
+                cb.SetComputeTextureParam(compute,traceKernel,NormalsId,normals??new RenderTargetIdentifier(BuiltinRenderTextureType.GBuffer2));
+                cb.SetComputeTextureParam(compute,traceKernel,SpecularId,specular??new RenderTargetIdentifier(BuiltinRenderTextureType.GBuffer1));
+                cb.SetComputeTextureParam(compute,traceKernel,BlueNoiseId,noise);cb.SetComputeTextureParam(compute,traceKernel,SceneId,source);
+                cb.SetComputeTextureParam(compute,traceKernel,RadianceOutputId,Radiance);cb.SetComputeTextureParam(compute,traceKernel,HitOutputId,Hit);
+                cb.SetComputeTextureParam(compute,traceKernel,PointOutputId,HitPoint);cb.SetComputeTextureParam(compute,traceKernel,RecordOutputId,Record);
+                cb.SetComputeTextureParam(compute,traceKernel,TraceInfoId,TraceInfo);
+                if(rejectionDiagnostics)cb.SetComputeTextureParam(compute,traceKernel,TraceStopId,TraceStop);
+                if(diagnostics)cb.SetComputeTextureParam(compute,traceKernel,DepthHitId,DepthHit);
+                if(diagnostics)cb.SetComputeTextureParam(compute,traceKernel,SampleOutputId,Sample);
                 cb.DispatchCompute(compute,traceKernel,(Radiance.width+traceGroupWidth-1)/traceGroupWidth,(Radiance.height+traceGroupHeight-1)/traceGroupHeight,1);
             }
             if(continuedSkyKernel>=0) {
                 using(SsrGpuSample.Measure(cb,camera,"Completed continuation sky")) {
-                    cb.SetComputeBufferParam(compute,continuedSkyKernel,"_SsrRasterState",Raster.Buffer);
-                    cb.SetComputeTextureParam(compute,continuedSkyKernel,"_WaterSurface",(Texture)water??Texture2D.blackTexture);
-                    cb.SetComputeTextureParam(compute,continuedSkyKernel,"_Normals",normals??new RenderTargetIdentifier(BuiltinRenderTextureType.GBuffer2));
-                    cb.SetComputeTextureParam(compute,continuedSkyKernel,"_HiZ0",Depth[0]);
-                    cb.SetComputeTextureParam(compute,continuedSkyKernel,"_RadianceOutput",Radiance);cb.SetComputeTextureParam(compute,continuedSkyKernel,"_HitOutput",Hit);
-                    cb.SetComputeTextureParam(compute,continuedSkyKernel,"_PointOutput",HitPoint);cb.SetComputeTextureParam(compute,continuedSkyKernel,"_RecordOutput",Record);
-                    cb.SetComputeTextureParam(compute,continuedSkyKernel,"_TraceInfo",TraceInfo);
+                    cb.SetComputeBufferParam(compute,continuedSkyKernel,SsrRasterStateId,Raster.Buffer);
+                    cb.SetComputeTextureParam(compute,continuedSkyKernel,WaterSurfaceId,(Texture)water??Texture2D.blackTexture);
+                    cb.SetComputeTextureParam(compute,continuedSkyKernel,NormalsId,normals??new RenderTargetIdentifier(BuiltinRenderTextureType.GBuffer2));
+                    cb.SetComputeTextureParam(compute,continuedSkyKernel,HiZ0Id,Depth[0]);
+                    cb.SetComputeTextureParam(compute,continuedSkyKernel,RadianceOutputId,Radiance);cb.SetComputeTextureParam(compute,continuedSkyKernel,HitOutputId,Hit);
+                    cb.SetComputeTextureParam(compute,continuedSkyKernel,PointOutputId,HitPoint);cb.SetComputeTextureParam(compute,continuedSkyKernel,RecordOutputId,Record);
+                    cb.SetComputeTextureParam(compute,continuedSkyKernel,TraceInfoId,TraceInfo);
                     cb.DispatchCompute(compute,continuedSkyKernel,(Radiance.width+7)/8,(Radiance.height+7)/8,1);
                 }
             }
         }
-        internal void CopyFinal(CommandBuffer cb,RenderTargetIdentifier target){properties.Clear();properties.SetVector("_Size",new Vector4(CameraWidth,CameraHeight,0,0));Draw(cb,NativeResult,target,0);}
+        internal void CopyFinal(CommandBuffer cb,RenderTargetIdentifier target){properties.Clear();properties.SetVector(SizeId,new Vector4(CameraWidth,CameraHeight,0,0));Draw(cb,NativeResult,target,0);}
         private void Draw(CommandBuffer cb,RenderTargetIdentifier source,RenderTargetIdentifier target,int pass) {
-            cb.SetGlobalTexture("_MainTex",source);cb.SetRenderTarget(target,RenderBufferLoadAction.DontCare,RenderBufferStoreAction.Store);cb.DrawMesh(triangle,Matrix4x4.identity,support,0,pass,properties);
+            cb.SetGlobalTexture(MainTexId,source);cb.SetRenderTarget(target,RenderBufferLoadAction.DontCare,RenderBufferStoreAction.Store);cb.DrawMesh(triangle,Matrix4x4.identity,support,0,pass,properties);
         }
         private void Drop(ref RenderTexture t){if(t!=null){if(RetireTexture!=null)RetireTexture(t);else {t.Release();UnityEngine.Object.DestroyImmediate(t);}}t=null;}
         private void ReleaseTrace(){Drop(ref Radiance);Drop(ref Hit);Drop(ref HitPoint);Drop(ref Record);Drop(ref TraceInfo);Drop(ref TraceStop);Drop(ref DepthHit);Drop(ref Sample);ResetHistory();}

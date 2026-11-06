@@ -23,6 +23,39 @@ namespace FuckTheseFX.Source.StochasticSSR
         internal enum Pass { Resolve,Compose,ReplayInput,ComposeNormal }
         private readonly Material material;
         private readonly MaterialPropertyBlock properties=new MaterialPropertyBlock();
+        private static readonly int CloudSkyId=Shader.PropertyToID("_CloudSky");
+        private static readonly int CloudSkyAvailableId=Shader.PropertyToID("_CloudSkyAvailable");
+        private static readonly int NativeReconstructionId=Shader.PropertyToID("_NativeReconstruction");
+        private static readonly int SsrRasterStateId=Shader.PropertyToID("_SsrRasterState");
+        private static readonly int SsrLateRasterId=Shader.PropertyToID("_SsrLateRaster");
+        private static readonly int WaterCoverageId=Shader.PropertyToID("_WaterCoverage");
+        private static readonly int WaterAvailableId=Shader.PropertyToID("_WaterAvailable");
+        private static readonly int PreAmbientSurfaceId=Shader.PropertyToID("_PreAmbientSurface");
+        private static readonly int SurfaceColourInfluenceId=Shader.PropertyToID("_SurfaceColourInfluence");
+        private static readonly int SizeId=Shader.PropertyToID("_Size");
+        private static readonly int ReflectionOptionsId=Shader.PropertyToID("_ReflectionOptions");
+        private static readonly int ZeroSmoothnessProbeId=Shader.PropertyToID("_ZeroSmoothnessProbe");
+        private static readonly int ZeroSmoothnessProbeFadeId=Shader.PropertyToID("_ZeroSmoothnessProbeFade");
+        private static readonly int ReceiverCutoffId=Shader.PropertyToID("_ReceiverCutoff");
+        private static readonly int InvProjectionId=Shader.PropertyToID("_InvProjection");
+        private static readonly int CameraToWorldId=Shader.PropertyToID("_CameraToWorld");
+        private static readonly int RawId=Shader.PropertyToID("_Raw");
+        private static readonly int GuideId=Shader.PropertyToID("_Guide");
+        private static readonly int PointId=Shader.PropertyToID("_Point");
+        private static readonly int RecordId=Shader.PropertyToID("_Record");
+        private static readonly int TraceInfoId=Shader.PropertyToID("_TraceInfo");
+        private static readonly int TraceStopId=Shader.PropertyToID("_TraceStop");
+        private static readonly int DepthHitId=Shader.PropertyToID("_DepthHit");
+        private static readonly int ThicknessConfidenceFloorId=Shader.PropertyToID("_ThicknessConfidenceFloor");
+        private static readonly int ContinuationLimitsId=Shader.PropertyToID("_ContinuationLimits");
+        private static readonly int DepthId=Shader.PropertyToID("_Depth");
+        private static readonly int ReceiverFallbackId=Shader.PropertyToID("_ReceiverFallback");
+        private static readonly int FallbackMipCountId=Shader.PropertyToID("_FallbackMipCount");
+        private static readonly int FallbackStrengthId=Shader.PropertyToID("_FallbackStrength");
+        private static readonly int UnfilledSignalId=Shader.PropertyToID("_UnfilledSignal");
+        private static readonly int SignalId=Shader.PropertyToID("_Signal");
+        private static readonly int ReplayInputId=Shader.PropertyToID("_ReplayInput");
+        private static readonly int MainTexId=Shader.PropertyToID("_MainTex");
         private readonly Mesh triangle;
         private Matrix4x4 previousView,previousProjection;
         private Options previous;
@@ -108,46 +141,46 @@ namespace FuckTheseFX.Source.StochasticSSR
                 previousSky=skyId;previousSkyWidth=skyWidth;previousSkyHeight=skyHeight;
             }
             properties.Clear();
-            properties.SetTexture("_CloudSky",sky!=null?sky:Texture2D.blackTexture);
-            properties.SetFloat("_CloudSkyAvailable",sky!=null?1:0);
-            properties.SetVector("_NativeReconstruction",Vector4.zero);
-            properties.SetBuffer("_SsrRasterState",p.Raster.Buffer);properties.SetFloat("_SsrLateRaster",p.Raster.Enabled?1:0);
+            properties.SetTexture(CloudSkyId,sky!=null?sky:Texture2D.blackTexture);
+            properties.SetFloat(CloudSkyAvailableId,sky!=null?1:0);
+            properties.SetVector(NativeReconstructionId,Vector4.zero);
+            properties.SetBuffer(SsrRasterStateId,p.Raster.Buffer);properties.SetFloat(SsrLateRasterId,p.Raster.Enabled?1:0);
             var water=WaterReflectionCapture.Get(camera,p.CameraWidth,p.CameraHeight);
-            properties.SetTexture("_WaterCoverage",water!=null?(Texture)water:Texture2D.blackTexture);
-            properties.SetFloat("_WaterAvailable",water!=null?1:0);
+            properties.SetTexture(WaterCoverageId,water!=null?(Texture)water:Texture2D.blackTexture);
+            properties.SetFloat(WaterAvailableId,water!=null?1:0);
             var surface=o.SurfaceColourInfluence>0?AmbientSurfaceCapture.Get(camera,p.CameraWidth,p.CameraHeight):null;
-            properties.SetTexture("_PreAmbientSurface",surface!=null?(Texture)surface:Texture2D.blackTexture);
-            properties.SetFloat("_SurfaceColourInfluence",surface!=null?o.SurfaceColourInfluence:0);
-            properties.SetVector("_Size",new Vector4(p.CameraWidth,p.CameraHeight,p.Radiance.width,p.Radiance.height));
+            properties.SetTexture(PreAmbientSurfaceId,surface!=null?(Texture)surface:Texture2D.blackTexture);
+            properties.SetFloat(SurfaceColourInfluenceId,surface!=null?o.SurfaceColourInfluence:0);
+            properties.SetVector(SizeId,new Vector4(p.CameraWidth,p.CameraHeight,p.Radiance.width,p.Radiance.height));
             UsedHistory=valid && o.Temporal;
-            properties.SetVector("_ReflectionOptions",new Vector4(o.Smoothness,(int)o.View,0,0));
-            properties.SetVector("_ZeroSmoothnessProbe",new Vector4(o.ZeroSmoothnessProbe?1:0,o.ZeroSmoothnessProbeStrength,0,0));
-            properties.SetVector("_ZeroSmoothnessProbeFade",new Vector4(o.ZeroSmoothnessProbeClose,o.ZeroSmoothnessProbeFadeStart,o.ZeroSmoothnessProbeFadeEnd,0));
-            properties.SetVector("_ReceiverCutoff",new Vector4(o.SupportSmoothness??o.Smoothness,o.CutoffEnvironmentBlend,0,0));
-            properties.SetMatrix("_InvProjection",projection.inverse);properties.SetMatrix("_CameraToWorld",camera.cameraToWorldMatrix);
-            properties.SetTexture("_Raw",p.Radiance);properties.SetTexture("_Guide",p.Hit);properties.SetTexture("_Point",p.HitPoint);properties.SetTexture("_Record",p.Record);
-            properties.SetTexture("_TraceInfo",p.TraceInfo);properties.SetTexture("_TraceStop",p.TraceStop!=null?(Texture)p.TraceStop:Texture2D.blackTexture);
-            properties.SetTexture("_DepthHit",p.DepthHit!=null?(Texture)p.DepthHit:Texture2D.blackTexture);properties.SetFloat("_ThicknessConfidenceFloor",o.ThicknessConfidenceFloor);
-            properties.SetVector("_ContinuationLimits",new Vector4(o.ContinuationSamples,o.ContinuationPixels,o.ContinuationDepth,0));
-            properties.SetTexture("_Depth",p.Depth[0]);
+            properties.SetVector(ReflectionOptionsId,new Vector4(o.Smoothness,(int)o.View,0,0));
+            properties.SetVector(ZeroSmoothnessProbeId,new Vector4(o.ZeroSmoothnessProbe?1:0,o.ZeroSmoothnessProbeStrength,0,0));
+            properties.SetVector(ZeroSmoothnessProbeFadeId,new Vector4(o.ZeroSmoothnessProbeClose,o.ZeroSmoothnessProbeFadeStart,o.ZeroSmoothnessProbeFadeEnd,0));
+            properties.SetVector(ReceiverCutoffId,new Vector4(o.SupportSmoothness??o.Smoothness,o.CutoffEnvironmentBlend,0,0));
+            properties.SetMatrix(InvProjectionId,projection.inverse);properties.SetMatrix(CameraToWorldId,camera.cameraToWorldMatrix);
+            properties.SetTexture(RawId,p.Radiance);properties.SetTexture(GuideId,p.Hit);properties.SetTexture(PointId,p.HitPoint);properties.SetTexture(RecordId,p.Record);
+            properties.SetTexture(TraceInfoId,p.TraceInfo);properties.SetTexture(TraceStopId,p.TraceStop!=null?(Texture)p.TraceStop:Texture2D.blackTexture);
+            properties.SetTexture(DepthHitId,p.DepthHit!=null?(Texture)p.DepthHit:Texture2D.blackTexture);properties.SetFloat(ThicknessConfidenceFloorId,o.ThicknessConfidenceFloor);
+            properties.SetVector(ContinuationLimitsId,new Vector4(o.ContinuationSamples,o.ContinuationPixels,o.ContinuationDepth,0));
+            properties.SetTexture(DepthId,p.Depth[0]);
             using(SsrGpuSample.Measure(cb,camera,"Receiver colour fallback"))ReceiverFallback.Render(cb,source,o.SupportSmoothness??o.Smoothness,o.Temporal);
-            properties.SetTexture("_ReceiverFallback",ReceiverFallback.Radiance);
-            properties.SetFloat("_FallbackMipCount",ReceiverFallback.MipCount);
-            properties.SetFloat("_FallbackStrength",o.FallbackStrength);
+            properties.SetTexture(ReceiverFallbackId,ReceiverFallback.Radiance);
+            properties.SetFloat(FallbackMipCountId,ReceiverFallback.MipCount);
+            properties.SetFloat(FallbackStrengthId,o.FallbackStrength);
             using(SsrGpuSample.Measure(cb,camera,"Radiance and coverage resolve"))Draw(cb,source,Resolved,Pass.Resolve);
             using(SsrGpuSample.Measure(cb,camera,"NRD specular denoising")) {
                 if(!Nrd.Render(cb,camera,p,Resolved,o))throw new InvalidOperationException("NRD frame preparation failed: "+Nrd.Error);
             }
             RenderTexture signal=Nrd.Output;
             var unfilled=signal;
-            properties.SetTexture("_UnfilledSignal",unfilled);
-            properties.SetTexture("_Signal",signal);
+            properties.SetTexture(UnfilledSignalId,unfilled);
+            properties.SetTexture(SignalId,signal);
             if(nativeReconstruction) {
                 if(NativeReconstruction==null)NativeReconstruction=new NativeReflectionReconstruction(gaussian);
                 NativeReconstruction.Ensure(unfilled.width,unfilled.height);
                 using(SsrGpuSample.Measure(cb,camera,"Native Gaussian reconstruction"))signal=NativeReconstruction.Render(cb,signal);
-                properties.SetTexture("_Signal",signal);
-                properties.SetVector("_NativeReconstruction",new Vector4(1,NativeReconstruction.MipCount,0,0));
+                properties.SetTexture(SignalId,signal);
+                properties.SetVector(NativeReconstructionId,new Vector4(1,NativeReconstruction.MipCount,0,0));
             } else if(NativeReconstruction!=null && !continuationCapture.Pending) {
                 NativeReconstruction.Dispose();NativeReconstruction=null;
             }
@@ -172,11 +205,11 @@ namespace FuckTheseFX.Source.StochasticSSR
                 EnsureCapture(ref fallbackCapture,p.CameraWidth,p.CameraHeight);
                 EnsureCapture(ref gapCapture,p.CameraWidth,p.CameraHeight);
                 EnsureCapture(ref probeCapture,p.CameraWidth,p.CameraHeight);
-                properties.SetVector("_ReflectionOptions",new Vector4(o.Smoothness,6,0,0));Draw(cb,source,probeCapture,Pass.Compose);
-                properties.SetVector("_ReflectionOptions",new Vector4(o.Smoothness,26,0,0));Draw(cb,source,coverageCapture,Pass.Compose);
-                properties.SetVector("_ReflectionOptions",new Vector4(o.Smoothness,33,0,0));Draw(cb,source,haloCapture,Pass.Compose);
-                properties.SetVector("_ReflectionOptions",new Vector4(o.Smoothness,28,0,0));Draw(cb,source,fallbackCapture,Pass.Compose);
-                properties.SetVector("_ReflectionOptions",new Vector4(o.Smoothness,36,0,0));Draw(cb,source,gapCapture,Pass.Compose);
+                properties.SetVector(ReflectionOptionsId,new Vector4(o.Smoothness,6,0,0));Draw(cb,source,probeCapture,Pass.Compose);
+                properties.SetVector(ReflectionOptionsId,new Vector4(o.Smoothness,26,0,0));Draw(cb,source,coverageCapture,Pass.Compose);
+                properties.SetVector(ReflectionOptionsId,new Vector4(o.Smoothness,33,0,0));Draw(cb,source,haloCapture,Pass.Compose);
+                properties.SetVector(ReflectionOptionsId,new Vector4(o.Smoothness,28,0,0));Draw(cb,source,fallbackCapture,Pass.Compose);
+                properties.SetVector(ReflectionOptionsId,new Vector4(o.Smoothness,36,0,0));Draw(cb,source,gapCapture,Pass.Compose);
                 var targets=new Dictionary<string,RenderTexture> {
                     {o.CaptureTraversal?"traversal-work":"sample-direction-pdf",p.Sample},{"trace-cost",p.TraceInfo},{"first-rejection",p.TraceStop},{"trace-record",p.Record},{"trace-guide",p.Hit},
                     {"resolved",Resolved},{"filtered",unfilled},{"gap-filled",signal},{"gap-fill-coverage",gapCapture},{"coverage-stages",coverageCapture},{"halo-stages",haloCapture},
@@ -213,11 +246,11 @@ namespace FuckTheseFX.Source.StochasticSSR
         // Sample the actual shader globals explicitly. Generic Blit of a named
         // global can resolve to the active scene target instead of the texture.
         internal void CaptureReplayInput(CommandBuffer cb,RenderTargetIdentifier source,RenderTexture target,int input) {
-            properties.SetInt("_ReplayInput",input);Draw(cb,source,target,Pass.ReplayInput);
+            properties.SetInt(ReplayInputId,input);Draw(cb,source,target,Pass.ReplayInput);
         }
         private void Draw(CommandBuffer cb,RenderTargetIdentifier source,RenderTargetIdentifier target,Pass pass)
         {
-            cb.SetGlobalTexture("_MainTex",source);cb.SetRenderTarget(target,RenderBufferLoadAction.DontCare,RenderBufferStoreAction.Store);
+            cb.SetGlobalTexture(MainTexId,source);cb.SetRenderTarget(target,RenderBufferLoadAction.DontCare,RenderBufferStoreAction.Store);
             cb.DrawMesh(triangle,Matrix4x4.identity,material,0,(int)pass,properties);
         }
         private static string MatrixText(Matrix4x4 m) {

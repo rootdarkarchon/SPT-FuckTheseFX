@@ -14,6 +14,12 @@ namespace FuckTheseFX.Source.StochasticSSR
         private readonly PropertySheet sheet;
         private readonly ComputeShader gaussian;
         private readonly int kernel;
+        private static readonly int CutOffThresholdId=Shader.PropertyToID("_CutOffThreshold");
+        private static readonly int TestId=Shader.PropertyToID("_Test");
+        private static readonly int HistoryId=Shader.PropertyToID("_History");
+        private static readonly int SourceId=Shader.PropertyToID("_Source");
+        private static readonly int ResultId=Shader.PropertyToID("_Result");
+        private static readonly int SizeId=Shader.PropertyToID("_Size");
         private RenderTexture misses,current,history;
         internal Action<RenderTexture> RetireTexture;
         internal RenderTexture Radiance {get;private set;}
@@ -47,8 +53,8 @@ namespace FuckTheseFX.Source.StochasticSSR
         internal void ResetHistory()=>valid=false;
         internal void Render(CommandBuffer cb,RenderTargetIdentifier source,float cutoff,bool temporal)
         {
-            sheet.properties.Clear();sheet.properties.SetFloat("_CutOffThreshold",cutoff);
-            sheet.properties.SetTexture("_Test",misses);
+            sheet.properties.Clear();sheet.properties.SetFloat(CutOffThresholdId,cutoff);
+            sheet.properties.SetTexture(TestId,misses);
             cb.SetRenderTarget(misses);cb.ClearRenderTarget(false,true,Color.clear);
             if(temporal) {
                 if(!Ready(current)){Drop(current);current=Target("current receiver colour",Radiance.width,Radiance.height,FilterMode.Bilinear);valid=false;}
@@ -56,7 +62,7 @@ namespace FuckTheseFX.Source.StochasticSSR
                 RuntimeUtilities.BlitFullscreenTriangle(cb,source,current,sheet,1);
                 // Matches native reset: initialize history from the original scene.
                 if(!valid)RuntimeUtilities.BlitFullscreenTriangle(cb,source,history);
-                sheet.properties.SetTexture("_History",history);
+                sheet.properties.SetTexture(HistoryId,history);
                 RuntimeUtilities.BlitFullscreenTriangle(cb,current,Radiance,sheet,2);
                 cb.CopyTexture(Radiance,0,0,history,0,0);
             } else {
@@ -71,10 +77,10 @@ namespace FuckTheseFX.Source.StochasticSSR
                 // cannot overlap the destination mip UAV. Earlier levels keep
                 // their native source chain; no same-resource SRV/UAV alias.
                 bool direct=i==mips.Count-1 && i>0;
-                cb.SetComputeTextureParam(gaussian,kernel,"_Source",input);
-                if(direct)cb.SetComputeTextureParam(gaussian,kernel,"_Result",Radiance,i+1);
-                else cb.SetComputeTextureParam(gaussian,kernel,"_Result",target);
-                cb.SetComputeVectorParam(gaussian,"_Size",new Vector4(w,h,1f/w,1f/h));
+                cb.SetComputeTextureParam(gaussian,kernel,SourceId,input);
+                if(direct)cb.SetComputeTextureParam(gaussian,kernel,ResultId,Radiance,i+1);
+                else cb.SetComputeTextureParam(gaussian,kernel,ResultId,target);
+                cb.SetComputeVectorParam(gaussian,SizeId,new Vector4(w,h,1f/w,1f/h));
                 // 768/1536 end in 12-pixel mips: dispatch the partial tile too.
                 cb.DispatchCompute(gaussian,kernel,(w+7)/8,(h+7)/8,1);
                 if(!direct)cb.CopyTexture(target,0,0,Radiance,0,i+1);input=target;

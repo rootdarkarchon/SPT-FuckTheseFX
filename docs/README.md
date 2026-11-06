@@ -37,3 +37,5 @@ These records describe previous implementations and validation runs. Use the cur
 - [SSR and water cleanup record](history/SSR-cleanup-20261003.md)
 
 The cleanup record also identifies a local research archive that is excluded from Git and runtime packages. That archive is not available in a fresh GitHub checkout.
+
+Pixel-locked scope rendering and the temporal frame capture moved to SPT-FuckTheseOptics.

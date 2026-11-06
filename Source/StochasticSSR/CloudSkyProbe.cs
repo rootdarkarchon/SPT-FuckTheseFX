@@ -19,6 +19,11 @@ namespace FuckTheseFX.Source.StochasticSSR
         private readonly ConditionalWeakTable<object,ProbeState> states=new ConditionalWeakTable<object,ProbeState>();
         private readonly Material material;
         private readonly MaterialPropertyBlock properties=new MaterialPropertyBlock();
+        private static readonly int CloudSkyId=Shader.PropertyToID("_CloudSky");
+        private static readonly int CloudSkyAvailableId=Shader.PropertyToID("_CloudSkyAvailable");
+        private static readonly int CloudProbeSizeId=Shader.PropertyToID("_CloudProbeSize");
+        private static readonly int CloudProbeFaceId=Shader.PropertyToID("_CloudProbeFace");
+        private static readonly int ReplayInputId=Shader.PropertyToID("_ReplayInput");
         private readonly Mesh triangle;
         private readonly CommandBuffer commands=new CommandBuffer {name="FTFX CloudSix reflection probe sky"};
         private bool failed,disposed;
@@ -79,12 +84,12 @@ namespace FuckTheseFX.Source.StochasticSSR
         internal void Populate(CommandBuffer cb,RenderTexture target,Texture sky,int mask)
         {
             if(target==null || !target.IsCreated() || target.dimension!=TextureDimension.Cube || sky==null)return;
-            properties.Clear();properties.SetInt("_ReplayInput",7);
-            properties.SetTexture("_CloudSky",sky);properties.SetFloat("_CloudSkyAvailable",1);
-            properties.SetFloat("_CloudProbeSize",target.width);
+            properties.Clear();properties.SetInt(ReplayInputId,7);
+            properties.SetTexture(CloudSkyId,sky);properties.SetFloat(CloudSkyAvailableId,1);
+            properties.SetFloat(CloudProbeSizeId,target.width);
             cb.BeginSample("FTFX SSR/CloudSix probe sky");
             for(int f=0;f<6;f++)if((mask&(1<<f))!=0) {
-                properties.SetInt("_CloudProbeFace",f);
+                properties.SetInt(CloudProbeFaceId,f);
                 cb.SetRenderTarget(target,0,(CubemapFace)f); // Load preserves the native lower hemisphere.
                 cb.DrawMesh(triangle,Matrix4x4.identity,material,0,(int)SsrReflectionPipeline.Pass.ReplayInput,properties);
             }

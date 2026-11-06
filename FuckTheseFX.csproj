@@ -3,15 +3,15 @@
     <TargetFramework>netstandard2.1</TargetFramework>
     <RootNamespace>FuckTheseFX</RootNamespace>
     <AssemblyName>FuckTheseFX</AssemblyName>
-    <Version>1.8.10</Version>
-    <AssemblyVersion>1.8.10</AssemblyVersion>
-    <FileVersion>1.8.10</FileVersion>
+    <Version>1.9.0</Version>
+    <AssemblyVersion>1.9.0</AssemblyVersion>
+    <FileVersion>1.9.0</FileVersion>
     <Authors>rootdarkarchon</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <Deterministic>true</Deterministic>
-    <DefaultItemExcludes>$(DefaultItemExcludes);Research\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Research\**;artifacts\**</DefaultItemExcludes>
     <SptInstallPath Condition="'$(SptInstallPath)' == ''">D:\Tarkov-SPT-4.1</SptInstallPath>
   </PropertyGroup>
   <ItemDefinitionGroup><Reference><Private>false</Private></Reference></ItemDefinitionGroup>

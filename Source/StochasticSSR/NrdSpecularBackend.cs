@@ -52,6 +52,14 @@ namespace FuckTheseFX.Source.StochasticSSR
         private Vector2 previousJitter;
         private readonly List<Pending> pending=new List<Pending>();
         private readonly List<IntPtr> lifetimes=new List<IntPtr>();
+        // A created texture keeps its native resource until it is released or replaced;
+        // GetNativeTexturePtr is a main-thread native call that can wait on pending creation.
+        private readonly RenderTexture[] textures=new RenderTexture[5];
+        private readonly IntPtr[] pointers=new IntPtr[5];
+        private static readonly int SizeId=Shader.PropertyToID("_Size"),ClipId=Shader.PropertyToID("_Clip"),EligibilityId=Shader.PropertyToID("_Eligibility"),
+            InvProjectionId=Shader.PropertyToID("_InvProjection"),SsrRasterStateId=Shader.PropertyToID("_SsrRasterState"),SsrLateRasterId=Shader.PropertyToID("_SsrLateRaster"),
+            GuideId=Shader.PropertyToID("_Guide"),PointId=Shader.PropertyToID("_Point"),RecordId=Shader.PropertyToID("_Record"),
+            WaterCoverageId=Shader.PropertyToID("_WaterCoverage"),WaterAvailableId=Shader.PropertyToID("_WaterAvailable");
         private sealed class Pending {internal IntPtr Token;internal Frame Frame;internal SsrRasterState.Snapshot Snapshot;}
         internal Statistics Stats {get {FTFX_NrdStats(handle,out var result);return result;}}
         // FTFX reconstructs clip Y as 2*textureUV.y-1. NRD's D3D convention
@@ -88,18 +96,23 @@ namespace FuckTheseFX.Source.StochasticSSR
             Motion=Target("surface motion",w,h,RenderTextureFormat.RGHalf);Output=Target("premultiplied display",w,h,RenderTextureFormat.ARGBHalf,true);Reset();
         }
         internal void Reset(){reset=true;}
+        private IntPtr Pointer(int slot,RenderTexture texture) {
+            if(!texture.IsCreated())throw new InvalidOperationException("NRD specular texture lost: "+texture.name);
+            if(textures[slot]!=texture){textures[slot]=texture;pointers[slot]=texture.GetNativeTexturePtr();}
+            return pointers[slot];
+        }
         internal bool Render(CommandBuffer cb,Camera camera,SsrPipeline p,RenderTexture signal,Options o) {
             try {
                 Ensure(signal.width,signal.height);
                 if(Stats.Status<0){Warn("native dispatch failed: "+Error);return false;}
                 if(owner!=camera){if(owner!=null)Camera.onPreRender-=FinalizeRaster;owner=camera;Camera.onPreRender+=FinalizeRaster;reset=true;}
-                properties.Clear();properties.SetVector("_Size",new Vector4(p.CameraWidth,p.CameraHeight,signal.width,signal.height));
-                properties.SetVector("_Clip",new Vector4(camera.nearClipPlane,camera.farClipPlane,0,0));
-                properties.SetVector("_Eligibility",new Vector4(o.Smoothness,0,0,o.ZeroSmoothnessProbe?1:0));
-                properties.SetMatrix("_InvProjection",GL.GetGPUProjectionMatrix(camera.projectionMatrix,false).inverse);
-                properties.SetBuffer("_SsrRasterState",p.Raster.Buffer);properties.SetFloat("_SsrLateRaster",p.Raster.Enabled?1:0);
-                properties.SetTexture("_Guide",p.Hit);properties.SetTexture("_Point",p.HitPoint);properties.SetTexture("_Record",p.Record);
-                var water=WaterReflectionCapture.Get(camera,p.CameraWidth,p.CameraHeight);properties.SetTexture("_WaterCoverage",water!=null?(Texture)water:Texture2D.blackTexture);properties.SetFloat("_WaterAvailable",water!=null?1:0);
+                properties.Clear();properties.SetVector(SizeId,new Vector4(p.CameraWidth,p.CameraHeight,signal.width,signal.height));
+                properties.SetVector(ClipId,new Vector4(camera.nearClipPlane,camera.farClipPlane,0,0));
+                properties.SetVector(EligibilityId,new Vector4(o.Smoothness,0,0,o.ZeroSmoothnessProbe?1:0));
+                properties.SetMatrix(InvProjectionId,GL.GetGPUProjectionMatrix(camera.projectionMatrix,false).inverse);
+                properties.SetBuffer(SsrRasterStateId,p.Raster.Buffer);properties.SetFloat(SsrLateRasterId,p.Raster.Enabled?1:0);
+                properties.SetTexture(GuideId,p.Hit);properties.SetTexture(PointId,p.HitPoint);properties.SetTexture(RecordId,p.Record);
+                var water=WaterReflectionCapture.Get(camera,p.CameraWidth,p.CameraHeight);properties.SetTexture(WaterCoverageId,water!=null?(Texture)water:Texture2D.blackTexture);properties.SetFloat(WaterAvailableId,water!=null?1:0);
                 cb.SetRenderTarget(new[]{new RenderTargetIdentifier(Normal),new RenderTargetIdentifier(Receiver),new RenderTargetIdentifier(Motion)},new RenderTargetIdentifier(BuiltinRenderTextureType.None));
                 cb.DrawMesh(triangle,Matrix4x4.identity,material,0,0,properties);
                 var current=GL.GetGPUProjectionMatrix(camera.nonJitteredProjectionMatrix,false);var view=camera.worldToCameraMatrix;
@@ -107,7 +120,7 @@ namespace FuckTheseFX.Source.StochasticSSR
                 var f=new Frame{Projection=NrdProjection(current),PreviousProjection=NrdProjection(reset?current:previousProjection),View=view,PreviousView=reset?view:previousView,
                     Jitter=jitter,PreviousJitter=reset?jitter:previousJitter,Reset=reset?1u:0,Frames=(uint)(o.Temporal?Mathf.Max(1,o.HistoryFrames):0),Index=index++,AntiFirefly=o.NrdAntiFirefly?1u:0,
                     DeltaMs=Time.unscaledDeltaTime>0?Mathf.Clamp(Time.unscaledDeltaTime*1000,1,1000):16.666667f};
-                var token=FTFX_NrdQueue(handle,signal.GetNativeTexturePtr(),Normal.GetNativeTexturePtr(),Receiver.GetNativeTexturePtr(),Motion.GetNativeTexturePtr(),Output.GetNativeTexturePtr(),ref f);
+                var token=FTFX_NrdQueue(handle,Pointer(0,signal),Pointer(1,Normal),Pointer(2,Receiver),Pointer(3,Motion),Pointer(4,Output),ref f);
                 if(token==IntPtr.Zero){Warn("native frame preparation failed");return false;}
                 cb.IssuePluginEventAndData(callback,1,token);
                 if(p.Raster.Enabled && p.Raster.Current!=null && !p.Raster.Current.Ready)pending.Add(new Pending{Token=token,Frame=f,Snapshot=p.Raster.Current});
@@ -131,6 +144,8 @@ namespace FuckTheseFX.Source.StochasticSSR
             // only frames that never reached late raster finalization.
             foreach(var p in pending)FTFX_NrdCancel(p.Token);pending.Clear();
             if(handle!=IntPtr.Zero){FTFX_NrdDestroy(handle);handle=IntPtr.Zero;}Drop(ref Normal);Drop(ref Receiver);Drop(ref Motion);Drop(ref Output);reset=true;index=0;
+            // Never keep views of retired textures alive in the cache across a reallocation.
+            Array.Clear(textures,0,textures.Length);Array.Clear(pointers,0,pointers.Length);
         }
         internal int DiscardQueuedFrames(){int count=0;foreach(var id in lifetimes)count+=FTFX_NrdCancelOwner(id);return count;}
         public void Dispose(){if(disposed)return;disposed=true;if(owner!=null)Camera.onPreRender-=FinalizeRaster;owner=null;DiscardQueuedFrames();lifetimes.Clear();Release();UnityEngine.Object.DestroyImmediate(material);UnityEngine.Object.DestroyImmediate(triangle);}
