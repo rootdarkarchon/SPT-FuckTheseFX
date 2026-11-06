@@ -9,3 +9,4 @@ __pycache__/
 
 .kata.local.toml
 .kata.toml
+.claude/
