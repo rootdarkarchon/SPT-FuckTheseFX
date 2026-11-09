@@ -19,7 +19,7 @@ namespace FuckTheseFX
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Guid = "com.rootdarkarchon.fuckthesefx";
-        public const string Version = "1.9.0";
+        public const string Version = "1.10.0";
         internal static ManualLogSource MyLog;
         internal static ConfigEntry<bool> AmbientHighlightEnabled, DistantShadowSamplingEnabled;
         internal static ConfigEntry<bool> DistantShadowsEnabled;
@@ -78,7 +78,7 @@ namespace FuckTheseFX
             FeatureStartup.TryInitialize("Bloom", bloom.Initialize);
             FeatureStartup.TryInitialize("Distant shadow sampling", () => sampling.Initialize(Info.Location));
             FeatureStartup.TryInitialize("Distant shadow resolution", resolution.Initialize);
-            occlusion = new XeGTAOIntegration(Info.Location, Occlusion);
+            occlusion = new XeGTAOIntegration(Info.Location, Occlusion, OpticAoCamera.Current);
             FeatureStartup.TryInitialize("XeGTAO", occlusion.Initialize);
             FeatureStartup.Report("Awake total", startup);
         }

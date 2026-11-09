@@ -65,8 +65,13 @@ namespace FuckTheseFX.Source.Occlusion
             Shader.SetGlobalTexture(Prefix+"OriginalOcclusion",Texture2D.whiteTexture); Shader.SetGlobalTexture(Prefix+"ScreenAO",Texture2D.whiteTexture);
         }
 
-        internal void Record(OcclusionSettings settings, int quality, bool ambientAvailable, bool mainCamera = false)
+        // Projection-derived compute constants are refreshed at Camera.onPreRender, after every component OnPreCull has settled the final matrix.
+        internal void UpdateProjection() { primary?.UpdateProjection(camera); actor?.UpdateProjection(camera); }
+
+        // primaryOnly: primary pass, ambient/diffuse/bent outputs and composite only (optic cameras); no actor pass, Contact GI, foliage, live or debug targets.
+        internal void Record(OcclusionSettings settings, int quality, bool ambientAvailable, bool mainCamera = false, bool primaryOnly = false)
         {
+            if(primaryOnly) mainCamera = false;
             Active = false; LightingDebugTexture = null; LastQuality = quality;
             capture.Clear(); calculate.Clear(); actors.Clear();
             bool bleedView = settings.View.Value == OcclusionView.ScreenSpaceContactGI || settings.View.Value == OcclusionView.ScreenSpaceContactGIHistory || (int)settings.View.Value >= 20;
@@ -140,7 +145,7 @@ namespace FuckTheseFX.Source.Occlusion
                 capture.SetGlobalFloat(Prefix+"MaterialCaptured",1);
             }
             else GpuAssets.Release(ref originalAlpha);
-            bool useActors = settings.Actors.Value && settings.ActorStrength.Value > 0;
+            bool useActors = !primaryOnly && settings.Actors.Value && settings.ActorStrength.Value > 0;
             if(useActors || useBleed || useLive || useFoliage)
             {
                 if(actorMask == null) actorMask = Target("Actor stencil",GraphicsFormat.R8_UNorm);
@@ -198,7 +203,8 @@ namespace FuckTheseFX.Source.Occlusion
                 Draw(calculate,1,primaryProperties);
             }
             calculate.EndSample("FTFX Primary composite");
-            if(settings.FoliageCapture)
+            if(primaryOnly) { GpuAssets.Release(ref debug); GpuAssets.Release(ref rawDebug); }
+            else if(settings.FoliageCapture)
             {
                 GpuAssets.Release(ref debug); GpuAssets.Release(ref rawDebug);
                 LightingDebugTexture = Foliage?.AO;

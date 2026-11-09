@@ -6,7 +6,7 @@ For live foliage comparisons, temporary lighting bypasses and the optional singl
 
 FuckTheseFX owns XeGTAO without an AOReplacer assembly, Amplify class, shader or render target. The Intel estimator and reviewed EFT 40743 CustomAmbient shader retain their provenance. Camera routing, allocation, deferred composition, fallback and configuration are implemented independently here.
 
-The normal AO controls are **2. XeGTAO / Enabled**, **2. XeGTAO / Quality** (0-3, default 3), and **2. XeGTAO / Second Pass Enabled**. XeGTAO tuning, CustomAmbient, actor tuning and debug settings remain available under Advanced. Values come from FuckTheseFX's configuration and defaults; no AOReplacer config is read. The FTFX Quality slider (0-3, default 3) selects the 1/2/3/9-slice presets for both AO passes unless primary sampling counts are overridden.
+The normal AO controls are **2. XeGTAO / Enabled**, **2. XeGTAO / Quality** (0-3, default 3), **2. XeGTAO / Optic AO Enabled** (default off, see [Optics](#optics)) and **2. XeGTAO / Second Pass Enabled**. XeGTAO tuning, CustomAmbient, actor tuning and debug settings remain available under Advanced. Values come from FuckTheseFX's configuration and defaults; no AOReplacer config is read. The FTFX Quality slider (0-3, default 3) selects the 1/2/3/9-slice presets for both AO passes unless primary sampling counts are overridden.
 
 The occlusion integration initializes independently of other rendering plugins. FTFX settings and the native camera/rendering requirements determine when its effects run.
 
@@ -18,6 +18,16 @@ The occlusion integration initializes independently of other rendering plugins. 
 - EFT records every camera's CustomAmbient draw with one shared native material. Each eligible camera draws with its own FTFX material variant, and the native material is never modified, so re-recording another camera (for example an optic render-target resize) cannot switch the main camera back to native ambient. Ineligible cameras keep the native material.
 - The primary result retains the selected intensity/power and uses the Advanced Distance fade start/end settings (defaults 100/250 metres of view depth). The same camera-owned curve drives deferred composition, CombinedAO, CustomAmbient foliage and bent normals. End values below start + 1 use a one-metre fade without rewriting saved settings. Raw AO views and the actor second-pass cutoff are independent. CustomAmbient uses it for authored zero-alpha foliage while preserving native reflection math. The native shader bundle hash is checked before patching ambient materials; unknown shaders retain native ambient.
 - Globals are reset before each camera and after rendering. Camera resources follow render-size changes and are removed on disable/destruction. Diagnostics use the current camera's outputs and leave configuration UI above the overlay.
+
+## Optics
+
+**2. XeGTAO / Optic AO Enabled** (default off; HQ Visuals and HQ+ Visuals enable it, Vanilla and Vanilla+ preserve it) runs the primary XeGTAO pass on EFT's single optic camera while an ordinary scope is active, for vanilla optics and FuckTheseOptics Optic Lock. It requires XeGTAO Enabled and game AO not Off. Nightvision and thermal optics are excluded and keep native rendering. The optic camera has no native AO component, so none is touched. In-game feedback (2026-11-09, 2560x1440 Optic Lock scope): visually correct under lens tilt, roughly 0.1 ms extra.
+
+- Primary only: the actor second pass, Contact GI, foliage extra AO/live/capture and all debug views remain main-camera only.
+- The optic camera records its own CustomAmbient variant, reflection occlusion, diffuse occlusion and bent normals through the same per-camera mechanism as the main camera; the main camera's inputs and globals are unaffected.
+- The projection is read at `Camera.onPreRender`, after every component `OnPreCull`, so the current frame's TAA/DLSS jitter and FuckTheseOptics Optic Lock's rolled or oblique projection are honoured. XeGTAO reconstructs view positions with the full inverse of the projection's x/y rows, not only its diagonal.
+- Resources follow the optic render target. FTO resizes it in steps, so the AO targets are recreated at each step; GPU cost scales with the optic render size.
+- Turning the toggle off, XeGTAO off, game AO Off, or switching an active scope to nightvision/thermal disposes the optic effect and restores native ambient for that camera. Leaving the scope keeps the effect allocated on the inactive optic camera so the next aim does not reallocate it. A failure logs once and disables optic AO until XeGTAO or the toggle is switched off/on.
 
 ## Actor optimization
 

@@ -41,8 +41,13 @@ namespace FuckTheseFX.Source.Occlusion
         private float captureStarted;
         private string captureStatus;
         private bool wasFoliageLive;
+        // The EFT optic camera is resolved outside Source/Occlusion; null disables optic AO. It owns one primary-only effect.
+        private readonly Func<Camera> opticResolver;
+        private Camera opticCamera;
+        private CameraOcclusion opticEffect;
+        private bool opticFailed, previousOptic;
 
-        internal XeGTAOIntegration(string path, OcclusionSettings settings) { pluginPath = path; this.settings = settings; }
+        internal XeGTAOIntegration(string path, OcclusionSettings settings, Func<Camera> opticResolver = null) { pluginPath = path; this.settings = settings; this.opticResolver = opticResolver; }
         internal void Initialize()
         {
             try
@@ -58,8 +63,9 @@ namespace FuckTheseFX.Source.Occlusion
                 harmony.Patch(target,prefix:new HarmonyMethod(typeof(XeGTAOIntegration),nameof(BeforeSettings)),postfix:new HarmonyMethod(typeof(XeGTAOIntegration),nameof(AfterSettings)));
                 var raidStart = AccessTools.Method(typeof(EFT.UI.PreloaderUI),nameof(EFT.UI.PreloaderUI.ShowRaidStartInfo));
                 if(raidStart != null) harmony.Patch(raidStart,postfix:new HarmonyMethod(typeof(XeGTAOIntegration),nameof(RaidStart)));
-                previousEnabled = settings.Enabled.Value;
+                previousEnabled = settings.Enabled.Value; previousOptic = settings.OpticAo.Value;
                 Camera.onPreCull += BeforeCamera;
+                Camera.onPreRender += BeforeRender;
                 Plugin.MyLog.LogInfo("Independent XeGTAO ready. Native AO is retained for Off and unsupported cameras.");
             }
             catch { Dispose(); throw; }
@@ -93,7 +99,7 @@ namespace FuckTheseFX.Source.Occlusion
         {
             foreach(var binding in bindings.Values)
                 if(binding.Camera == camera && binding.Effect != null && binding.Effect.Active && binding.Effect.AmbientActive) return true;
-            return false;
+            return opticEffect != null && opticCamera == camera && opticEffect.Active && opticEffect.AmbientActive;
         }
         private FoliageLive LiveTarget(Camera camera)
         {
@@ -126,6 +132,46 @@ namespace FuckTheseFX.Source.Occlusion
                     Plugin.MyLog.LogError("XeGTAO camera failed; native AO restored. Toggle XeGTAO off/on to retry. "+error);
                 }
             }
+            BeforeOpticCamera(camera);
+        }
+        private Camera Optic() => opticResolver != null ? opticResolver() : null;
+        private bool MainAoActive()
+        {
+            var manager = CameraManager.Instance;
+            return manager != null && bindings.TryGetValue(manager,out var main) && main.Mode != ESSAOMode.Off && !main.Failed;
+        }
+        private void DisposeOptic()
+        {
+            if(opticEffect == null) return;
+            opticEffect.Dispose(); opticEffect = null;
+            if(opticCamera != null) ambient?.Restore(opticCamera);
+            opticCamera = null;
+        }
+        private void BeforeOpticCamera(Camera camera)
+        {
+            if(opticEffect == null && !settings.OpticAo.Value) return;
+            var optic = Optic();
+            bool eligible = optic != null && optic == camera && settings.Enabled.Value && settings.OpticAo.Value && !opticFailed &&
+                MainAoActive() && Time.unscaledTime >= resumeAt && GpuAssets.Supports(camera);
+            if(!eligible) { if(opticEffect != null && opticCamera == camera) DisposeOptic(); return; }
+            try
+            {
+                if(opticEffect != null && opticCamera != camera) DisposeOptic();
+                if(opticEffect == null) { opticEffect = new CameraOcclusion(camera,assets); opticCamera = camera; }
+                opticEffect.Record(settings,settings.Quality.Value,ambient.Ready,false,true);
+            }
+            catch(Exception error)
+            {
+                DisposeOptic(); opticFailed = true;
+                Plugin.MyLog.LogError("XeGTAO optic camera failed; optic AO disabled. Toggle Optic AO Enabled or XeGTAO off/on to retry. "+error);
+            }
+        }
+        // The final projection (PostProcessLayer jitter, then FuckTheseOptics Optic Lock) is only settled after every OnPreCull.
+        private void BeforeRender(Camera camera)
+        {
+            foreach(var binding in bindings.Values)
+                if(binding.Camera == camera && binding.Effect != null && binding.Effect.Active) binding.Effect.UpdateProjection();
+            if(opticEffect != null && opticCamera == camera && opticEffect.Active) opticEffect.UpdateProjection();
         }
         internal void Update()
         {
@@ -137,7 +183,16 @@ namespace FuckTheseFX.Source.Occlusion
             {
                 previousEnabled = settings.Enabled.Value;
                 foreach(var binding in bindings.Values) { binding.Restore(); binding.Failed = false; }
+                opticFailed = false; DisposeOptic();
                 ambient.Restore(); diagnostic = null;
+            }
+            if(previousOptic != settings.OpticAo.Value) { previousOptic = settings.OpticAo.Value; opticFailed = false; DisposeOptic(); }
+            // Keep the effect while the optic camera is merely inactive between aims; re-creating it on every aim-in would
+            // reallocate its targets. Ineligible active scopes (nightvision/thermal) are disposed in BeforeOpticCamera.
+            if(opticEffect != null)
+            {
+                var optic = Optic();
+                if(opticCamera == null || !settings.Enabled.Value || !settings.OpticAo.Value || (optic != null && optic != opticCamera) || !MainAoActive()) DisposeOptic();
             }
             if(!settings.Ambient.Value || settings.AmbientStrengthFraction <= 0) ambient.Restore();
             if(++cleanupFrames >= 300) { cleanupFrames = 0; ambient.Prune(); }
@@ -279,6 +334,8 @@ namespace FuckTheseFX.Source.Occlusion
         public void Dispose()
         {
             Camera.onPreCull -= BeforeCamera;
+            Camera.onPreRender -= BeforeRender;
+            DisposeOptic();
             harmony?.UnpatchSelf(); harmony = null;
             foreach(var binding in bindings.Values) binding.Restore(); bindings.Clear();
             ambient?.Dispose(); ambient = null;

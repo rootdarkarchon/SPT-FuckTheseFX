@@ -38,6 +38,7 @@ namespace FuckTheseFX
             new Definition("1. Vanilla Optimizations", "Distant Shadows Full Filter Samples", 8, "More samples smooth full-resolution shadow edges and reduce flicker. 25 uses native filtering.", true, new AcceptableValueRange<int>(1, 25)),
             new Definition("2. XeGTAO", "Enabled", false, "Replace Tarkov's AO with XeGTAO. Off restores native AO. Quality is selected below; game AO Off disables the replacement and actor pass. Performance: no impact or an improvement over vanilla HBAO.", false),
             new Definition("2. XeGTAO", "Quality", 3, "Quality for primary and actor XeGTAO: 0 Low (1 slice/2 steps), 1 Medium (2/2), 2 High (3/3), 3 Ultra (9/3). Independent of Tarkov's HBAO quality. Advanced primary sample overrides still apply.", false, new AcceptableValueRange<int>(0, 3)),
+            new Definition("2. XeGTAO", "Optic AO Enabled", false, "Run the primary XeGTAO pass inside ordinary optic scopes, including FuckTheseOptics Optic Lock. The actor second pass, Contact GI, foliage and debug views stay main-camera only; nightvision and thermal optics are excluded. Requires XeGTAO Enabled and game AO not Off. GPU cost scales with the optic render size. HQ Visuals and HQ+ Visuals enable it; Vanilla and Vanilla+ preserve it.", false),
             new Definition("2. XeGTAO", "EffectRadius", 1f, "AO radius in metres before RadiusMultiplier.", true, new AcceptableValueRange<float>(0.01f, 5f)),
             new Definition("2. XeGTAO", "RadiusMultiplier", 1.457f, "Multiplies radius in the AO calculation and depth prefilter.", true, new AcceptableValueRange<float>(0.1f, 3f)),
             new Definition("2. XeGTAO", "FalloffRange (%)", 62, "Percentage of the effective radius over which occlusion fades out. 62 means 62% of the radius.", true, new AcceptableValueRange<int>(5, 100)),
@@ -225,6 +226,7 @@ namespace FuckTheseFX
                     Set(SSR, "Enabled", highQuality);
                     if(highQuality) {
                         Set(SSR, "Optic SSR enabled", preset==Preset.HighQualityPlusVisuals);
+                        Set(XeGTAO, "Optic AO Enabled", true);
                     }
                 }
             }

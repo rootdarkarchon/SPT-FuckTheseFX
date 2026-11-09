@@ -261,6 +261,16 @@
   },
   {
     "section": "2. XeGTAO",
+    "key": "Optic AO Enabled",
+    "default": "False",
+    "type": "Boolean",
+    "advanced": false,
+    "min": null,
+    "max": null,
+    "list": null
+  },
+  {
+    "section": "2. XeGTAO",
     "key": "EffectRadius",
     "default": "1",
     "type": "Single",

@@ -9,7 +9,7 @@ namespace FuckTheseFX.Source.Occlusion
     // Configuration owns policy; neither the GPU pipeline nor the camera owns saved preferences.
     internal sealed class OcclusionSettings
     {
-        internal ConfigEntry<bool> Enabled, Normals, Ambient, Actors, BentNormals, ReflectionOcclusion;
+        internal ConfigEntry<bool> Enabled, Normals, Ambient, Actors, BentNormals, ReflectionOcclusion, OpticAo;
         internal ConfigEntry<float> Radius, RadiusMultiplier, Distribution, Sharpness, Power;
         internal ConfigEntry<int> Falloff, Thickness;
         internal ConfigEntry<float> FadeStart, FadeEnd;
@@ -49,6 +49,7 @@ namespace FuckTheseFX.Source.Occlusion
             AmbientStrength = catalog.Bind<int>(SettingsCatalog.XeGTAO, "Custom Ambient Fix Strength (%)");
             Foliage = catalog.Bind<int>(SettingsCatalog.XeGTAO, "Custom Ambient Fix Foliage AO strength (%)");
             Actors = catalog.Bind<bool>(SettingsCatalog.XeGTAO, "Second Pass Enabled");
+            OpticAo = catalog.Bind<bool>(SettingsCatalog.XeGTAO, "Optic AO Enabled");
             ActorRadius = catalog.Bind<float>(SettingsCatalog.XeGTAO, "Second Pass Radius");
             ActorStrength = catalog.Bind<float>(SettingsCatalog.XeGTAO, "Second Pass Strength");
             ActorResponse = catalog.Bind<float>(SettingsCatalog.XeGTAO, "Second Pass Response");

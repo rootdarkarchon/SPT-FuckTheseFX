@@ -1,6 +1,6 @@
 # Configuration
 
-F12 > Fuck These FX exposes 103 settings and four preset buttons. Numeric ranges are inclusive. Names ending in (%) store literal integer percentages; 20 means 20%, even when the maximum is 50.
+F12 > Fuck These FX exposes 104 settings and four preset buttons. Numeric ranges are inclusive. Names ending in (%) store literal integer percentages; 20 means 20%, even when the maximum is 50.
 
 Groups appear in numeric order: Presets, Vanilla Optimizations, XeGTAO, Screen Space Contact Global Illumination, Stochastic GGX SSR, Custom Water, Debug.
 
@@ -12,7 +12,7 @@ The following note appears above the buttons:
 
 > Hold Shift while pressing on a preset button to restore full defaults. FTFX provides more settings than shown when enabling "Advanced Settings". The current advanced settings, presets and defaults are tuned and authored for visuals and performance.
 
-**Vanilla**, **FTFX Vanilla+ (Default)**, **FTFX HQ Visuals**, and **FTFX HQ+ Visuals** change the eleven shared controls below on a normal click. HQ Visuals disables optic SSR; HQ+ Visuals enables it. Vanilla and Vanilla+ preserve optic enablement. All presets preserve optic resolution, which defaults to R512. All other values, including the main-resolution reduction toggle, SSR history, water mode, tuning, and diagnostics, are preserved by these selective presets.
+**Vanilla**, **FTFX Vanilla+ (Default)**, **FTFX HQ Visuals**, and **FTFX HQ+ Visuals** change the eleven shared controls below on a normal click. HQ Visuals disables optic SSR; HQ+ Visuals enables it. Both HQ presets enable optic AO. Vanilla and Vanilla+ preserve optic SSR and optic AO enablement. All presets preserve optic resolution, which defaults to R512. All other values, including the main-resolution reduction toggle, SSR history, water mode, tuning, and diagnostics, are preserved by these selective presets.
 
 Holding Shift while clicking any preset restores every shipped default first, then applies the selected preset's controls. For example, Shift-clicking FTFX HQ Visuals resets advanced settings, water mode, diagnostics and SSR history before applying HQ visuals. HQ+ uses the HQ Visuals baseline and enables SSCGI and optic SSR. Shift-click restores R512 optic resolution for every preset.
 
@@ -27,6 +27,7 @@ Holding Shift while clicking any preset restores every shipped default first, th
 | Ultimate Bloom Input Scale (%) | 100 | 50 | 50 | 50 |
 | Distant Shadows Resolution Fix | false | true | true | true |
 | 2. XeGTAO / Enabled | false | false | true | true |
+| 2. XeGTAO / Optic AO Enabled | Preserved | Preserved | true | true |
 | 3. Screen Space Contact Global Illumination / Enabled | false | false | false | true |
 | 4. Stochastic GGX SSR / Enabled | false | false | true | true |
 | 4. Stochastic GGX SSR / Optic SSR enabled | Preserved | Preserved | false | true |
@@ -58,6 +59,7 @@ Existing configuration sections are not migrated or explicitly cleaned. Changed 
 |---|---|---|---|---|
 | Enabled | false | false, true | bool | No |
 | Quality | 3 | 0 – 3 | int | No |
+| Optic AO Enabled | false | false, true | bool | No |
 | EffectRadius | 1 | 0.01 – 5 | float | Yes |
 | RadiusMultiplier | 1.457 | 0.1 – 3 | float | Yes |
 | FalloffRange (%) | 62 | 5 – 100 | int | Yes |

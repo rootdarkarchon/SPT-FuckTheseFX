@@ -104,7 +104,13 @@ uint XeGTAO_FLOAT4_to_R8G8B8A8_UNORM( lpfloat4 unpackedInput )
 float3 XeGTAO_ComputeViewspacePosition( const float2 screenPos, const float viewspaceDepth, const GTAOConstants consts )
 {
     float3 ret;
+#ifdef XE_GTAO_GENERAL_PROJECTION
+    // FTFX: full 2x2 unprojection, adapter-provided. XE_GTAO_NDC_TO_VIEW_MAT = (M00,M01,M10,M11) row-major, XE_GTAO_NDC_TO_VIEW_ADD = (A.xy, C.xy):
+    // viewspace.xy = (M * screenPos + A) * depth + C. Equals the original (NDCToViewMul * screenPos + NDCToViewAdd) * depth for M = diag(Mul), A = Add, C = 0.
+    ret.xy = (float2(dot(XE_GTAO_NDC_TO_VIEW_MAT.xy, screenPos.xy), dot(XE_GTAO_NDC_TO_VIEW_MAT.zw, screenPos.xy)) + XE_GTAO_NDC_TO_VIEW_ADD.xy) * viewspaceDepth + XE_GTAO_NDC_TO_VIEW_ADD.zw;
+#else
     ret.xy = (consts.NDCToViewMul * screenPos.xy + consts.NDCToViewAdd) * viewspaceDepth;
+#endif
     ret.z = viewspaceDepth;
     return ret;
 }
@@ -335,7 +341,14 @@ void XeGTAO_MainPass( const uint2 pixCoord, lpfloat sliceCount, lpfloat stepsPer
         const lpfloat pixelTooCloseThreshold  = 1.3;      // if the offset is under approx pixel size (pixelTooCloseThreshold), push it out to the minimum distance
 
         // approx viewspace pixel size at pixCoord; approximation of NDCToViewspace( normalizedScreenPos.xy + consts.ViewportPixelSize.xy, pixCenterPos.z ).xy - pixCenterPos.xy;
+#ifdef XE_GTAO_GENERAL_PROJECTION
+        // FTFX: viewspace (per unit depth) of one pixel step along screen x / y. Only .x is consumed below, as the length of the step so rolled projections stay valid.
+        const float2 viewStepX = float2(XE_GTAO_NDC_TO_VIEW_MAT.x, XE_GTAO_NDC_TO_VIEW_MAT.z) * consts.ViewportPixelSize.x;
+        const float2 viewStepY = float2(XE_GTAO_NDC_TO_VIEW_MAT.y, XE_GTAO_NDC_TO_VIEW_MAT.w) * consts.ViewportPixelSize.y;
+        const float2 pixelDirRBViewspaceSizeAtCenterZ = viewspaceZ.xx * length(viewStepX).xx;
+#else
         const float2 pixelDirRBViewspaceSizeAtCenterZ = viewspaceZ.xx * consts.NDCToViewMul_x_PixelSize;
+#endif
 
         lpfloat screenspaceRadius   = effectRadius / (lpfloat)pixelDirRBViewspaceSizeAtCenterZ.x;
 
@@ -380,7 +393,12 @@ void XeGTAO_MainPass( const uint2 pixCoord, lpfloat sliceCount, lpfloat stepsPer
             omega *= screenspaceRadius;
 
             // line 8 from the paper
+#ifdef XE_GTAO_GENERAL_PROJECTION
+            // FTFX: the slice's screen direction (cosPhi, -sinPhi) lifted to viewspace; (cosPhi, sinPhi) for an unrolled square-pixel projection.
+            const lpfloat3 directionVec = lpfloat3((lpfloat2)normalize(viewStepX * cosPhi - viewStepY * sinPhi), 0);
+#else
             const lpfloat3 directionVec = lpfloat3(cosPhi, sinPhi, 0);
+#endif
 
             // line 9 from the paper
             const lpfloat3 orthoDirectionVec = directionVec - (dot(directionVec, viewVec) * viewVec);

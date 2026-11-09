@@ -45,6 +45,7 @@ public static partial class OcclusionValidation
     PersistentFoliageAO(assets);
     BentPipeline(assets);
     BentCameraIsolation(assets);
+    ProjectionRoll(assets);
     ActorEquivalence(assets,256,144);
     ActorEquivalence(assets,259,147);
     CameraLifecycle(assets);

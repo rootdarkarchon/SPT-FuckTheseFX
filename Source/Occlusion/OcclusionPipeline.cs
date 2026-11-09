@@ -59,18 +59,35 @@ namespace FuckTheseFX.Source.Occlusion
         private RenderTexture Target(string suffix, GraphicsFormat format, bool mips = false) =>
             GpuAssets.Target("FTFX " + (actor ? "Actor " : "Primary ") + suffix, width, height, format, true, mips);
 
+        private static readonly int ndcToViewMat = Shader.PropertyToID("_XeNDCToViewMat"), ndcToViewAdd = Shader.PropertyToID("_XeNDCToViewAdd");
+
+        // Sets the projection-derived constants directly on this pipeline's own compute instance, not through the command buffer:
+        // a camera.onPreRender subscriber can then refresh them after every component (e.g. FuckTheseOptics) finalised the projection.
+        // XeGTAO view space is Unity's with Y and Z reflected; with ndc = 2*uv-1, Q = [m00 m01; m10 m11], o = (m02,m12), t = (m03,m13), W = diag(1,-1)*Q^-1:
+        // xy = (M*uv + A)*depth + C, M = 2W, A = W*(o-1), C = -W*t. A diagonal projection gives the former (2/m00, -2/m11, (m02-1)/m00, (1-m12)/m11), C = 0.
+        internal void UpdateProjection(Camera camera)
+        {
+            var m = camera.projectionMatrix;
+            float det = m.m00*m.m11 - m.m01*m.m10;
+            // Runs every frame: a singular or non-finite matrix keeps the previous valid constants rather than throwing.
+            if (!(Mathf.Abs(det) > 1e-12f)) return;
+            float inverse = 1/det, w00 = m.m11*inverse, w01 = -m.m01*inverse, w10 = m.m10*inverse, w11 = -m.m00*inverse;
+            float ox = m.m02-1, oy = m.m12-1;
+            compute.SetVector(ndcToViewMat, new Vector4(2*w00,2*w01,2*w10,2*w11));
+            compute.SetVector(ndcToViewAdd, new Vector4(w00*ox+w01*oy,w10*ox+w11*oy,-(w00*m.m03+w01*m.m13),-(w10*m.m03+w11*m.m13)));
+        }
+
         internal void Record(CommandBuffer cb, Camera camera, int quality, Parameters p, RenderTexture actorMask = null, float cutoff = 10, bool optimize = true, bool bentNormals = false)
         {
             BentNormals = bentNormals && !actor;
             float near = camera.nearClipPlane, far = camera.farClipPlane;
             float mul = near * far / (far-near), add = far/(far-near);
             if (SystemInfo.usesReversedZBuffer) { mul = -mul; add = -near/(far-near); }
-            var projection = camera.projectionMatrix;
             cb.SetComputeVectorParam(compute, "_XeViewport", new Vector4(width,height,1f/width,1f/height));
             cb.SetComputeVectorParam(compute, "_XeDepthAndRadius", new Vector4(mul,add,p.Radius,p.Sharpness));
             cb.SetComputeVectorParam(compute, "_XeTuning", new Vector4(p.Multiplier,p.Falloff,p.Distribution,p.Thickness));
             cb.SetComputeVectorParam(compute, "_XeSampling", new Vector4(p.Slices > 0 ? p.Slices : quality == 3 ? 9 : quality+1, p.Steps > 0 ? p.Steps : quality < 2 ? 2 : 3,0,0));
-            cb.SetComputeVectorParam(compute, "_XeNDCToView", new Vector4(2/projection.m00,-2/projection.m11,(projection.m02-1)/projection.m00,(1-projection.m12)/projection.m11));
+            UpdateProjection(camera);
             cb.SetComputeMatrixParam(compute, "_XeWorldToView", camera.worldToCameraMatrix);
             cb.SetComputeIntParam(compute, "_XeNormalSource", p.Normals ? 2 : 0);
             cb.SetComputeFloatParam(compute, "_XeFarDepth", far);

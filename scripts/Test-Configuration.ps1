@@ -18,7 +18,7 @@ $null = $bind.Invoke($null, $bindArgs)
 $catalog = $plugin.GetField('Settings', $flags).GetValue($null)
 $entries = @($catalog.GetType().GetProperty('Settings', $flags).GetValue($catalog))
 $expected = Get-Content (Join-Path $PSScriptRoot 'ConfigurationExpectations.json') -Raw | ConvertFrom-Json
-if ($config.Count -ne 104 -or $entries.Count -ne 103 -or $expected.Count -ne 103) { throw 'Expected 103 real settings plus one UI row' }
+if ($config.Count -ne 105 -or $entries.Count -ne 104 -or $expected.Count -ne 104) { throw 'Expected 104 real settings plus one UI row' }
 function Entry($section, $key) { $config[[BepInEx.Configuration.ConfigDefinition]::new($section, $key)] }
 function Tag($entry, $name) { $entry.Description.Tags[0].GetType().GetField($name).GetValue($entry.Description.Tags[0]) }
 foreach ($spec in $expected) {
@@ -141,6 +141,7 @@ foreach ($key in @('Additional Ambient Highlight','Sharpen Filter','Vintage Filt
 $highQuality['2. XeGTAO/Enabled']=$true
 $highQuality['4. Stochastic GGX SSR/Enabled']=$true
 $highQuality['4. Stochastic GGX SSR/Optic SSR enabled']=$false
+$highQuality['2. XeGTAO/Optic AO Enabled']=$true
 $highQualityPlus=$highQuality.Clone()
 $highQualityPlus['4. Stochastic GGX SSR/Optic SSR enabled']=$true
 $highQualityPlus['3. Screen Space Contact Global Illumination/Enabled']=$true
@@ -180,7 +181,7 @@ foreach ($savePolicy in @($false,$true)) {
     }
 }
 $bindArgs[0]=$config;$null=$bind.Invoke($null,$bindArgs)
-if ($config.Count -ne 104) { throw 'Repeated binding duplicated settings' }
+if ($config.Count -ne 105) { throw 'Repeated binding duplicated settings' }
 foreach ($savePolicy in @($false,$true)) {
     $startupPath=Join-Path $testRoot "startup-save-$savePolicy.cfg"
     $original="[1. Vanilla Optimizations]`nUltimate Bloom Input Scale (%) = 75`n`n[External Preserved]`nUnbound = keep`n"
@@ -188,7 +189,7 @@ foreach ($savePolicy in @($false,$true)) {
     $startupConfig=[BepInEx.Configuration.ConfigFile]::new($startupPath,$false)
     $startupConfig.SaveOnConfigSet=$savePolicy
     $bindArgs[0]=$startupConfig;$null=$bind.Invoke($null,$bindArgs)
-    if ($startupConfig.SaveOnConfigSet -ne $savePolicy -or $startupConfig.Count -ne 104) { throw 'Startup binding changed save policy or catalog' }
+    if ($startupConfig.SaveOnConfigSet -ne $savePolicy -or $startupConfig.Count -ne 105) { throw 'Startup binding changed save policy or catalog' }
     $bloomEntry=$startupConfig[[BepInEx.Configuration.ConfigDefinition]::new('1. Vanilla Optimizations','Ultimate Bloom Input Scale (%)')]
     if ($bloomEntry.Value -ne 75) { throw 'Startup binding lost an existing setting' }
     $text=[IO.File]::ReadAllText($startupPath)
@@ -199,4 +200,4 @@ foreach ($savePolicy in @($false,$true)) {
         if ([IO.File]::ReadAllText($startupPath) -notmatch 'Ultimate Bloom Input Scale \(%\) = 80') { throw 'Automatic saving was not restored after startup' }
     }
 }
-Write-Output 'Verified 103 settings, numerically ordered CM 18.4 groups, integer percentages, eight-frame SSR default, default-on endpoint sky fallback, normal optic toggle, R512 optic default and preserved preset resolution, four preset labels/tooltips and help text, selective and Shift-reset presets, save policy and persistence.'
+Write-Output 'Verified 104 settings, numerically ordered CM 18.4 groups, integer percentages, eight-frame SSR default, default-on endpoint sky fallback, normal optic toggle, R512 optic default and preserved preset resolution, four preset labels/tooltips and help text, selective and Shift-reset presets, save policy and persistence.'

@@ -21,11 +21,16 @@
 #define XE_GTAO_USE_HALF_FLOAT_PRECISION 0
 #define XE_GTAO_FP32_DEPTHS 1
 #define XE_GTAO_USE_DEFAULT_CONSTANTS 0
+// General 2x2 unprojection: viewspace.xy = (M * screenPos + A) * depth + C, set by OcclusionPipeline.UpdateProjection (see Upstream/README.md).
+#define XE_GTAO_GENERAL_PROJECTION
+#define XE_GTAO_NDC_TO_VIEW_MAT _XeNDCToViewMat
+#define XE_GTAO_NDC_TO_VIEW_ADD _XeNDCToViewAdd
+float4 _XeNDCToViewMat; // row-major 2x2 M: M00, M01, M10, M11
+float4 _XeNDCToViewAdd; // offset A.xy, constant C.zw
 #include "Upstream/XeGTAO.hlsli"
 
 float4 _XeViewport; // size.xy, reciprocal size.zw
 float4 _XeDepthAndRadius; // depth unpack multiply/add, radius, denoise beta
-float4 _XeNDCToView; // multiply.xy, add.zw
 float4 _XeTuning; // radius multiplier, falloff range, sample distribution power, thin-occluder compensation
 float4 _XeSampling; // slices, steps per side per slice
 float4x4 _XeWorldToView;
@@ -80,10 +85,7 @@ GTAOConstants Constants()
     c.ViewportSize = (int2)_XeViewport.xy;
     c.ViewportPixelSize = _XeViewport.zw;
     c.DepthUnpackConsts = _XeDepthAndRadius.xy;
-    c.NDCToViewMul = _XeNDCToView.xy;
-    c.NDCToViewAdd = _XeNDCToView.zw;
-    c.CameraTanHalfFOV = abs(c.NDCToViewMul) * 0.5;
-    c.NDCToViewMul_x_PixelSize = c.NDCToViewMul * c.ViewportPixelSize;
+    // NDCToViewMul/Add, CameraTanHalfFOV and NDCToViewMul_x_PixelSize stay zero: XE_GTAO_GENERAL_PROJECTION replaces every upstream use.
     c.EffectRadius = _XeDepthAndRadius.z;
     c.EffectFalloffRange = _XeTuning.y;
     c.RadiusMultiplier = _XeTuning.x;
