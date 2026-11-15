@@ -37,6 +37,7 @@ public static partial class OcclusionValidation
     DiffuseAfterDecals(assets);
     ReflectionOcclusionLifecycle(assets);
     DistanceFading(assets);
+    RtaoComposite(assets);
     AmbientDrawInstrumentation(assets);
     AmbientCameraIsolation(assets);
     FoliageCapturePipeline(assets);

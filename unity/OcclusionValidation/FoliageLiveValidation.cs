@@ -139,9 +139,9 @@ public static partial class OcclusionValidation
     // Fog colour must not be multiplied by AO; fully opaque fog must erase all surface contrast.
     float expected=.8f*Mathf.Lerp(1,visibility,strength)*transmission+.6f*(1-transmission);
     float baseline=.8f*transmission+.6f*(1-transmission);
-    settings.View.Value=OcclusionView.Normal;pass.Record(settings,ao,alpha,actor);camera.Render();
+    settings.View.Value=OcclusionView.Normal;pass.Record(settings,ao,alpha,actor,RtaoInput.None);camera.Render();
     Require(Mathf.Abs(ReadAt(target,16,32).r-expected)<.002f && Mathf.Abs(ReadAt(target,48,32).r-expected)<.002f,"normal foliage AO must affect both sides with shared 100/250 fade");
-    settings.View.Value=OcclusionView.FoliageLive;pass.Record(settings,ao,alpha,actor);camera.Render();
+    settings.View.Value=OcclusionView.FoliageLive;pass.Record(settings,ao,alpha,actor,RtaoInput.None);camera.Render();
     Require(Mathf.Abs(ReadAt(target,16,32).r-baseline)<.002f && Mathf.Abs(ReadAt(target,48,32).r-expected)<.002f,"fog must cover live split AO without darkening fog colour");
    }
   }

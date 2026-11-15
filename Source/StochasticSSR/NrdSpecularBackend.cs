@@ -56,6 +56,7 @@ namespace FuckTheseFX.Source.StochasticSSR
         // GetNativeTexturePtr is a main-thread native call that can wait on pending creation.
         private readonly RenderTexture[] textures=new RenderTexture[5];
         private readonly IntPtr[] pointers=new IntPtr[5];
+        private readonly RenderTargetIdentifier[] targets=new RenderTargetIdentifier[3];
         private static readonly int SizeId=Shader.PropertyToID("_Size"),ClipId=Shader.PropertyToID("_Clip"),EligibilityId=Shader.PropertyToID("_Eligibility"),
             InvProjectionId=Shader.PropertyToID("_InvProjection"),SsrRasterStateId=Shader.PropertyToID("_SsrRasterState"),SsrLateRasterId=Shader.PropertyToID("_SsrLateRaster"),
             GuideId=Shader.PropertyToID("_Guide"),PointId=Shader.PropertyToID("_Point"),RecordId=Shader.PropertyToID("_Record"),
@@ -113,7 +114,8 @@ namespace FuckTheseFX.Source.StochasticSSR
                 properties.SetBuffer(SsrRasterStateId,p.Raster.Buffer);properties.SetFloat(SsrLateRasterId,p.Raster.Enabled?1:0);
                 properties.SetTexture(GuideId,p.Hit);properties.SetTexture(PointId,p.HitPoint);properties.SetTexture(RecordId,p.Record);
                 var water=WaterReflectionCapture.Get(camera,p.CameraWidth,p.CameraHeight);properties.SetTexture(WaterCoverageId,water!=null?(Texture)water:Texture2D.blackTexture);properties.SetFloat(WaterAvailableId,water!=null?1:0);
-                cb.SetRenderTarget(new[]{new RenderTargetIdentifier(Normal),new RenderTargetIdentifier(Receiver),new RenderTargetIdentifier(Motion)},new RenderTargetIdentifier(BuiltinRenderTextureType.None));
+                targets[0]=new RenderTargetIdentifier(Normal);targets[1]=new RenderTargetIdentifier(Receiver);targets[2]=new RenderTargetIdentifier(Motion);
+                cb.SetRenderTarget(targets,new RenderTargetIdentifier(BuiltinRenderTextureType.None));
                 cb.DrawMesh(triangle,Matrix4x4.identity,material,0,0,properties);
                 var current=GL.GetGPUProjectionMatrix(camera.nonJitteredProjectionMatrix,false);var view=camera.worldToCameraMatrix;
                 var jitter=SsrRasterState.JitterUV(GL.GetGPUProjectionMatrix(camera.projectionMatrix,false),current);

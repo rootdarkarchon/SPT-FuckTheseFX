@@ -42,14 +42,19 @@ namespace FuckTheseFX.Source.Occlusion
             catch { Dispose(); throw; }
         }
 
-        internal static bool Supports(Camera camera) => camera != null &&
-            camera.actualRenderingPath == RenderingPath.DeferredShading && !camera.orthographic && !camera.stereoEnabled &&
-            camera.pixelWidth >= 16 && camera.pixelHeight >= 16 && SystemInfo.supportsComputeShaders &&
+        private static bool? deviceSupported;
+
+        // Device-constant capabilities never change at runtime; probe once (main thread) because the Unity format queries box an enum per call.
+        private static bool DeviceSupported => deviceSupported ??= SystemInfo.supportsComputeShaders &&
             SystemInfo.graphicsDeviceType == GraphicsDeviceType.Direct3D11 && SystemInfo.supportedRenderTargetCount >= 2 &&
             SystemInfo.IsFormatSupported(GraphicsFormat.R32_SFloat, FormatUsage.LoadStore) &&
             SystemInfo.IsFormatSupported(GraphicsFormat.R32_UInt, FormatUsage.LoadStore) &&
             SystemInfo.IsFormatSupported(GraphicsFormat.R8_UNorm, FormatUsage.LoadStore) &&
             SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RGHalf);
+
+        internal static bool Supports(Camera camera) => camera != null &&
+            camera.actualRenderingPath == RenderingPath.DeferredShading && !camera.orthographic && !camera.stereoEnabled &&
+            camera.pixelWidth >= 16 && camera.pixelHeight >= 16 && DeviceSupported;
 
         internal static RenderTexture Target(string name, int width, int height, GraphicsFormat format, bool random = false, bool mips = false)
         {

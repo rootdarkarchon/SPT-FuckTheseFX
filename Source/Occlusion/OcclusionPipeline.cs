@@ -60,6 +60,7 @@ namespace FuckTheseFX.Source.Occlusion
             GpuAssets.Target("FTFX " + (actor ? "Actor " : "Primary ") + suffix, width, height, format, true, mips);
 
         private static readonly int ndcToViewMat = Shader.PropertyToID("_XeNDCToViewMat"), ndcToViewAdd = Shader.PropertyToID("_XeNDCToViewAdd");
+        private static readonly int[] mipIds = { Shader.PropertyToID("_XeMip0"), Shader.PropertyToID("_XeMip1"), Shader.PropertyToID("_XeMip2"), Shader.PropertyToID("_XeMip3"), Shader.PropertyToID("_XeMip4") };
 
         // Sets the projection-derived constants directly on this pipeline's own compute instance, not through the command buffer:
         // a camera.onPreRender subscriber can then refresh them after every component (e.g. FuckTheseOptics) finalised the projection.
@@ -96,7 +97,7 @@ namespace FuckTheseFX.Source.Occlusion
             cb.SetComputeFloatParam(compute, "_XeActorCutoff", cutoff);
             cb.BeginSample(actor ? "FTFX Actor depth" : "FTFX Primary depth");
             cb.SetComputeTextureParam(compute,prefilter,"_XeRawDepth",BuiltinRenderTextureType.ResolvedDepth);
-            for(int mip=0;mip<5;mip++) cb.SetComputeTextureParam(compute,prefilter,"_XeMip"+mip,Depth,mip);
+            for(int mip=0;mip<5;mip++) cb.SetComputeTextureParam(compute,prefilter,mipIds[mip],Depth,mip);
             cb.DispatchCompute(compute,prefilter,(width+15)/16,(height+15)/16,1);
             cb.EndSample(actor ? "FTFX Actor depth" : "FTFX Primary depth");
             if(actor && optimize)

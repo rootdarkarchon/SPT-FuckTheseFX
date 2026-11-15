@@ -40,10 +40,21 @@ Shader "Hidden/FuckTheseFX/Occlusion"
    uint visibility = _BentNormals > .5 ? packed >> 24 : packed;
    return float2(saturate(visibility*(_Size.w/255)),min(_XeDepth.Load(int3(p,0))/_Size.z,65504));
   }
-  float Primary(float2 ao)
+  Texture2D<float> _RtaoVisibility; // FuckTheseRays hidden-occluder visibility V_hid (camera-target texel order)
+  SamplerState linear_clamp_sampler;
+  float _RtaoStrength; // accepted strength (0 = off, bit-identical to the pure XeGTAO curve)
+  float Primary(float2 ao,float2 uv)
   {
    float fade=saturate((ao.y*_Size.z-_AOFade.x)*_AOFade.y);
-   return saturate(1+(pow(max(ao.x,0),lerp(.8,_AOFade.w,fade))-1)*lerp(2,_AOFade.z,fade));
+   float v=saturate(1+(pow(max(ao.x,0),lerp(.8,_AOFade.w,fade))-1)*lerp(2,_AOFade.z,fade));
+   // Applied after the XeGTAO power/intensity curve; the RT term vanishes with the same distance fade.
+   if(_RtaoStrength>0)
+   {
+    float rt=saturate(_RtaoVisibility.SampleLevel(linear_clamp_sampler,uv,0));
+    float k=saturate(_RtaoStrength)*(1-fade);
+    v*=lerp(1,rt,k);
+   }
+   return v;
   }
   struct Outputs { float4 albedo:SV_Target0; float4 emission:SV_Target1; };
   float ReflectionVisibility(Varyings i,float diffuse)
@@ -65,12 +76,12 @@ Shader "Hidden/FuckTheseFX/Occlusion"
   }
   Outputs Deferred(Varyings i)
   {
-   float v=Primary(_PrimaryAO.Load(int3(Pixel(i),0)));
+   float v=Primary(_PrimaryAO.Load(int3(Pixel(i),0)),i.uv);
    Outputs o; o.albedo=ReflectionVisibility(i,v); o.emission=float4(v,v,v,1); return o;
   }
   Outputs DeferredLog(Varyings i)
   {
-   float v=Primary(_PrimaryAO.Load(int3(Pixel(i),0)));
+   float v=Primary(_PrimaryAO.Load(int3(Pixel(i),0)),i.uv);
    Outputs o; o.albedo=ReflectionVisibility(i,v);
    // Emission is encoded as exp2(-radiance) in the LDR deferred buffer.
    o.emission=float4(pow(max(_Emission.Load(int3(Pixel(i),0)).rgb,1e-20),v),1);
@@ -100,12 +111,12 @@ Shader "Hidden/FuckTheseFX/Occlusion"
     return float4(FTFXBentWorld(_XeAO.Load(int3(p,0)),_BentToWorld,normal)*.5+.5,1);
    }
    float2 ao=_PrimaryAO.Load(int3(Pixel(i),0));
-   float v= _Debug.x==1 ? saturate((ao.y*_Size.z-_Debug.y)/_Debug.z) : _Debug.x==6 ? Primary(ao) : ao.x;
+   float v= _Debug.x==1 ? saturate((ao.y*_Size.z-_Debug.y)/_Debug.z) : _Debug.x==6 ? Primary(ao,i.uv) : ao.x;
    return float4(v,v,v,1);
   }
   Texture2D<float4> _FTFXMaterialInput;
   float4 MaterialAlpha(Varyings i):SV_Target { return _FTFXMaterialInput.Load(int3(Pixel(i),0)).aaaa; }
-  float4 DiffuseVisibility(Varyings i):SV_Target { return MaterialAlpha(i)*Primary(_PrimaryAO.Load(int3(Pixel(i),0))); }
+  float4 DiffuseVisibility(Varyings i):SV_Target { return MaterialAlpha(i)*Primary(_PrimaryAO.Load(int3(Pixel(i),0)),i.uv); }
   Texture2D<float> _LiveAlpha;
   Texture2D<float4> _LiveA, _LiveB;
   float4 _LiveSettings; // extra strength, divider (-1 full frame), far plane, unused
@@ -118,7 +129,7 @@ Shader "Hidden/FuckTheseFX/Occlusion"
   float4 LiveComposite(Varyings i):SV_Target
   {
    int2 p=Pixel(i);
-   float v=LiveEligible(p) && i.uv.x>=_LiveSettings.y ? lerp(1,Primary(_PrimaryAO.Load(int3(p,0))),saturate(_LiveSettings.x)) : 1;
+   float v=LiveEligible(p) && i.uv.x>=_LiveSettings.y ? lerp(1,Primary(_PrimaryAO.Load(int3(p,0)),i.uv),saturate(_LiveSettings.x)) : 1;
    return float4(v,v,v,1);
   }
   float4 LiveDisplay(Varyings i):SV_Target

@@ -9,12 +9,14 @@ namespace FuckTheseFX.Source.Occlusion
     // Configuration owns policy; neither the GPU pipeline nor the camera owns saved preferences.
     internal sealed class OcclusionSettings
     {
-        internal ConfigEntry<bool> Enabled, Normals, Ambient, Actors, BentNormals, ReflectionOcclusion, OpticAo;
+        internal ConfigEntry<bool> Enabled, Normals, Ambient, Actors, BentNormals, ReflectionOcclusion, OpticAo, RtEnabled;
         internal ConfigEntry<float> Radius, RadiusMultiplier, Distribution, Sharpness, Power;
         internal ConfigEntry<int> Falloff, Thickness;
         internal ConfigEntry<float> FadeStart, FadeEnd;
         internal ConfigEntry<int> Slices, Steps, Denoise, Quality;
         internal ConfigEntry<float> ActorRadius, ActorStrength, ActorResponse, ActorCutoff, DepthRange, DepthStart, BentDifferenceGain, AmbientContributionGain;
+        internal ConfigEntry<int> RtStrength;
+        internal ConfigEntry<float> RtRadius;
         internal ConfigEntry<int> AmbientStrength, Foliage;
         internal ConfigEntry<OcclusionView> View;
         internal ConfigEntry<float> ColorBleedGain;
@@ -50,6 +52,9 @@ namespace FuckTheseFX.Source.Occlusion
             Foliage = catalog.Bind<int>(SettingsCatalog.XeGTAO, "Custom Ambient Fix Foliage AO strength (%)");
             Actors = catalog.Bind<bool>(SettingsCatalog.XeGTAO, "Second Pass Enabled");
             OpticAo = catalog.Bind<bool>(SettingsCatalog.XeGTAO, "Optic AO Enabled");
+            RtEnabled = catalog.Bind<bool>(SettingsCatalog.XeGTAO, "RT AO Enabled");
+            RtStrength = catalog.Bind<int>(SettingsCatalog.XeGTAO, "RT AO Strength (%)");
+            RtRadius = catalog.Bind<float>(SettingsCatalog.XeGTAO, "RT AO Radius");
             ActorRadius = catalog.Bind<float>(SettingsCatalog.XeGTAO, "Second Pass Radius");
             ActorStrength = catalog.Bind<float>(SettingsCatalog.XeGTAO, "Second Pass Strength");
             ActorResponse = catalog.Bind<float>(SettingsCatalog.XeGTAO, "Second Pass Response");
@@ -72,6 +77,11 @@ namespace FuckTheseFX.Source.Occlusion
 
 
         internal float AmbientStrengthFraction => SettingsCatalog.Fraction(AmbientStrength);
+        internal float RtStrengthFraction => SettingsCatalog.Fraction(RtStrength);
+        /// <summary>Whether the main camera asks FuckTheseRays for ray-traced visibility; FTR does no AO work otherwise.</summary>
+        internal bool RtRequested => RtEnabled.Value && RtStrength.Value > 0;
+        /// <summary>The radius XeGTAO itself uses: EffectRadius * RadiusMultiplier (see OcclusionPipeline.Record).</summary>
+        internal float EffectiveRadius => Radius.Value * RadiusMultiplier.Value;
         internal float FoliageFraction => SettingsCatalog.Fraction(Foliage);
         internal float FoliageExtraAOFraction => SettingsCatalog.Fraction(FoliageExtraAO);
         internal float FoliageSplitPositionFraction => SettingsCatalog.Fraction(FoliageSplitPosition);

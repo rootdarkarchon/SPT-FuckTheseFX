@@ -1,6 +1,6 @@
 # Configuration
 
-F12 > Fuck These FX exposes 104 settings and four preset buttons. Numeric ranges are inclusive. Names ending in (%) store literal integer percentages; 20 means 20%, even when the maximum is 50.
+F12 > Fuck These FX exposes 107 settings and four preset buttons. Numeric ranges are inclusive. Names ending in (%) store literal integer percentages; 20 means 20%, even when the maximum is 50.
 
 Groups appear in numeric order: Presets, Vanilla Optimizations, XeGTAO, Screen Space Contact Global Illumination, Stochastic GGX SSR, Custom Water, Debug.
 
@@ -60,6 +60,9 @@ Existing configuration sections are not migrated or explicitly cleaned. Changed 
 | Enabled | false | false, true | bool | No |
 | Quality | 3 | 0 – 3 | int | No |
 | Optic AO Enabled | false | false, true | bool | No |
+| RT AO Enabled | true | false, true | bool | No |
+| RT AO Strength (%) | 100 | 0 – 100 | int | Yes |
+| RT AO Radius | 3 | 0.5 – 10 (metres) | float | Yes |
 | EffectRadius | 1 | 0.01 – 5 | float | Yes |
 | RadiusMultiplier | 1.457 | 0.1 – 3 | float | Yes |
 | FalloffRange (%) | 62 | 5 – 100 | int | Yes |

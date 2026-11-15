@@ -17,6 +17,10 @@ namespace FuckTheseFX.Source.Occlusion
         private static string lastBleedUnsupportedReason;
         private RenderTexture resolved, originalAlpha, actorMask, debug, rawDebug, diffuseOcclusion;
         private readonly CommandBuffer reset, capture, calculate, actors, cleanup;
+        // DrawMesh copies block contents at record time, so these are cleared and refilled each frame instead of reallocated.
+        private readonly MaterialPropertyBlock primaryProperties = new MaterialPropertyBlock(), actorProperties = new MaterialPropertyBlock(), resolveProperties = new MaterialPropertyBlock();
+        private static readonly RenderTargetIdentifier[] emissionTargets = {BuiltinRenderTextureType.GBuffer0,BuiltinRenderTextureType.GBuffer3};
+        private static readonly RenderTargetIdentifier[] compositeTargets = {BuiltinRenderTextureType.GBuffer0,BuiltinRenderTextureType.CameraTarget};
         private int width, height;
         private CameraEvent calculationEvent;
         internal int LastQuality { get; private set; }
@@ -115,6 +119,9 @@ namespace FuckTheseFX.Source.Occlusion
             composite.SetVector("_AOFade",distanceFade);
             composite.SetVector("_ActorSettings",new Vector4(settings.ActorStrength.Value,settings.ActorResponse.Value,settings.ActorCutoff.Value,0));
             composite.SetVector("_Debug",new Vector4((int)settings.View.Value,settings.DepthStart.Value,settings.DepthRange.Value,0));
+            // Only the main camera consumes FTR's hidden-occluder AO; optic cameras and unaccepted frames bind white with strength zero.
+            var rtao = mainCamera ? FtrRtao.Accept(settings) : RtaoInput.None;
+            rtao.Apply(composite);
             AmbientActive = ambientAvailable && settings.Ambient.Value && settings.AmbientStrengthFraction > 0;
             bool reflectionOcclusion = AmbientActive && settings.ReflectionOcclusion.Value;
             composite.SetFloat("_ReflectionOcclusion",reflectionOcclusion ? 1 : 0);
@@ -174,7 +181,7 @@ namespace FuckTheseFX.Source.Occlusion
                 }
             }
             calculate.BeginSample("FTFX Primary composite");
-            var primaryProperties = new MaterialPropertyBlock(); primaryProperties.SetTexture("_PrimaryAO",resolved);
+            primaryProperties.Clear(); primaryProperties.SetTexture("_PrimaryAO",resolved);
             primaryProperties.SetTexture("_XeAO",primary.Result);
             if(AmbientActive)
             {
@@ -193,13 +200,13 @@ namespace FuckTheseFX.Source.Occlusion
                 calculate.GetTemporaryRT(emission,width,height,0,FilterMode.Point,RenderTextureFormat.ARGB2101010,RenderTextureReadWrite.Linear);
                 calculate.Blit(BuiltinRenderTextureType.GBuffer3,emission);
                 calculate.SetGlobalTexture("_Emission",emission);
-                calculate.SetRenderTarget(new RenderTargetIdentifier[] {BuiltinRenderTextureType.GBuffer0,BuiltinRenderTextureType.GBuffer3},BuiltinRenderTextureType.CameraTarget);
+                calculate.SetRenderTarget(emissionTargets,BuiltinRenderTextureType.CameraTarget);
                 Draw(calculate,2,primaryProperties);
                 calculate.ReleaseTemporaryRT(emission);
             }
             else
             {
-                calculate.SetRenderTarget(new RenderTargetIdentifier[] {BuiltinRenderTextureType.GBuffer0,BuiltinRenderTextureType.CameraTarget},BuiltinRenderTextureType.CameraTarget);
+                calculate.SetRenderTarget(compositeTargets,BuiltinRenderTextureType.CameraTarget);
                 Draw(calculate,1,primaryProperties);
             }
             calculate.EndSample("FTFX Primary composite");
@@ -239,11 +246,11 @@ namespace FuckTheseFX.Source.Occlusion
                 if(actor == null) actor = new OcclusionPipeline(assets.Compute,true);
                 actor.Prepare(width,height,1);
                 actor.Record(actors,camera,quality,settings.Actor,actorMask,settings.ActorCutoff.Value);
-                var properties = new MaterialPropertyBlock();
-                properties.SetTexture("_XeAO",actor.Result); properties.SetTexture("_XeDepth",actor.Depth); properties.SetTexture("_ActorMask",actorMask);
+                actorProperties.Clear();
+                actorProperties.SetTexture("_XeAO",actor.Result); actorProperties.SetTexture("_XeDepth",actor.Depth); actorProperties.SetTexture("_ActorMask",actorMask);
                 actors.BeginSample("FTFX Actor composite");
-                actors.SetRenderTarget(BuiltinRenderTextureType.CameraTarget); Draw(actors,4,properties);
-                if(settings.View.Value == OcclusionView.SecondPassAO) { actors.SetRenderTarget(debug); Draw(actors,6,properties); }
+                actors.SetRenderTarget(BuiltinRenderTextureType.CameraTarget); Draw(actors,4,actorProperties);
+                if(settings.View.Value == OcclusionView.SecondPassAO) { actors.SetRenderTarget(debug); Draw(actors,6,actorProperties); }
                 actors.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
                 actors.EndSample("FTFX Actor composite");
             }
@@ -265,18 +272,18 @@ namespace FuckTheseFX.Source.Occlusion
             if(useFoliage)
             {
                 if(foliageAO == null) foliageAO = new FoliageOcclusion(camera,assets);
-                foliageAO.Record(settings,resolved,originalAlpha,actorMask);
+                foliageAO.Record(settings,resolved,originalAlpha,actorMask,rtao);
             }
             else { foliageAO?.Dispose(); foliageAO = null; }
             // The live BeforeOpaque snapshot must include the surface AO that feeds native fog.
-            Live?.Record(settings,resolved,originalAlpha,actorMask);
+            Live?.Record(settings,resolved,originalAlpha,actorMask,rtao);
             Active = true;
         }
         private void Resolve(CommandBuffer cb, RenderTexture input, RenderTexture output, RenderTexture depth, Vector4 size)
         {
-            var properties = new MaterialPropertyBlock();
-            properties.SetTexture("_XeAO",input); properties.SetTexture("_XeDepth",depth); properties.SetVector("_Size",size);
-            cb.SetRenderTarget(output); Draw(cb,0,properties);
+            resolveProperties.Clear();
+            resolveProperties.SetTexture("_XeAO",input); resolveProperties.SetTexture("_XeDepth",depth); resolveProperties.SetVector("_Size",size);
+            cb.SetRenderTarget(output); Draw(cb,0,resolveProperties);
         }
         private void Draw(CommandBuffer cb,int pass,MaterialPropertyBlock properties = null) => cb.DrawMesh(assets.Quad,Matrix4x4.identity,composite,0,pass,properties);
         private RenderTexture Target(string name, GraphicsFormat format) => GpuAssets.Target("FTFX "+name,width,height,format);

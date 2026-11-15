@@ -7,6 +7,7 @@ FTFX gives you control over Tarkov's lighting and post-processing in **SPT 4.1**
 - **Vanilla rendering controls:** toggle the ambient highlight, vintage and sharpen filters; adjust bloom and exposure sampling; skip unnecessary passes when supported effects are inactive.
 - **Distant shadows:** choose shadow resolution and filtering to balance detail, smoothness and GPU work.
 - **XeGTAO ambient occlusion:** replace native AO, with separate actor shading and controls for ambient and foliage lighting.
+- **Ray-traced hidden-occluder AO:** with FuckTheseRays running RTGI, XeGTAO also darkens surfaces under cars and overhangs that screen space cannot see (**2. XeGTAO / RT AO Enabled**). No effect without FuckTheseRays.
 - **Stochastic GGX reflections:** replace main-camera screen-space reflections with NRD-denoised reflections. Optics keep native SSR.
 - **Screen Space Contact Global Illumination (SSCGI):** add short-range colour bounce from nearby surfaces.
 - **Customs water:** optional surface and ripple controls for supported Customs water, including optic views.
@@ -43,7 +44,7 @@ Settings apply live and save to `BepInEx/config/com.rootdarkarchon.fuckthesefx.c
 
 ## Using the replacement effects
 
-- **XeGTAO:** keep AO enabled in Tarkov's graphics settings. Setting game AO to Off also disables FTFX's AO and actor pass. The normal Optic AO Enabled toggle (off by default; HQ Visuals and HQ+ enable it) runs the primary XeGTAO pass inside ordinary scopes, including FuckTheseOptics Optic Lock; the actor pass stays main-camera only, nightvision and thermal optics are excluded, and GPU cost scales with the optic render size.
+- **XeGTAO:** keep AO enabled in Tarkov's graphics settings. Setting game AO to Off also disables FTFX's AO and actor pass. The normal Optic AO Enabled toggle (off by default; HQ Visuals and HQ+ enable it) runs the primary XeGTAO pass inside ordinary scopes, including FuckTheseOptics Optic Lock; the actor pass stays main-camera only, nightvision and thermal optics are excluded, and GPU cost scales with the optic render size. **RT AO Enabled** (default on) combines XeGTAO with FuckTheseRays' ray-traced hidden-occluder visibility on the main camera only; it needs FuckTheseRays with RTGI running and does nothing otherwise.
 - **FTFX reflections:** keep SSR enabled in Tarkov's graphics settings. The normal Optic SSR enabled toggle controls separate GGX SSR and denoising in ordinary scopes, with R512 as the default scope resolution. An advanced toggle lowers main SSR one resolution step while scoped. Nightvision and thermal optics remain native. HQ Visuals leaves optic SSR off; HQ+ enables it. Presets preserve the scope resolution.
 - **SSCGI:** requires XeGTAO and a supported main HDR deferred camera. It can run with FTFX reflections off.
 - **Custom water:** select **Advanced Settings > 5. Custom Water > Mode > FTFX**. Native is the default; other maps keep their native water.

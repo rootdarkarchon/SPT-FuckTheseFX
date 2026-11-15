@@ -114,21 +114,23 @@ namespace FuckTheseFX.Source.Occlusion
             foreach(var binding in bindings.Values)
             {
                 if(binding.Camera != camera) continue;
+                bool main = CameraManager.Instance != null && CameraManager.Instance.Camera == camera;
                 bool enabled = settings.Enabled.Value && binding.Mode != ESSAOMode.Off && !binding.Failed &&
                     Time.unscaledTime >= resumeAt && GpuAssets.Supports(camera);
-                if(!enabled) { binding.Restore(); ambient.Restore(camera); continue; }
+                if(!enabled) { binding.Restore(); ambient.Restore(camera); if(main) FtrRtao.ClearRequest(); continue; }
                 try
                 {
                     if(binding.Effect == null) binding.Effect = new CameraOcclusion(camera,assets);
-                    binding.Effect.Record(settings,settings.Quality.Value,ambient.Ready,
-                        CameraManager.Instance != null && CameraManager.Instance.Camera == camera);
+                    binding.Effect.Record(settings,settings.Quality.Value,ambient.Ready,main);
+                    // FTR does no AO work unless this fresh request exists; written after Record so a failed camera never requests.
+                    if(main) { if(settings.RtRequested) FtrRtao.Request(settings); else FtrRtao.ClearRequest(); }
                     if(binding.Manager._hbao != null) binding.Manager._hbao.enabled = false;
                     if(binding.Manager._ambientOcclusion != null) binding.Manager._ambientOcclusion.enabled = false;
                     diagnostic = binding.Effect.DebugTexture;
                 }
                 catch(Exception error)
                 {
-                    binding.Restore(); binding.Failed = true; ambient.Restore(camera); diagnostic = null;
+                    binding.Restore(); binding.Failed = true; ambient.Restore(camera); diagnostic = null; if(main) FtrRtao.ClearRequest();
                     Plugin.MyLog.LogError("XeGTAO camera failed; native AO restored. Toggle XeGTAO off/on to retry. "+error);
                 }
             }
@@ -341,7 +343,7 @@ namespace FuckTheseFX.Source.Occlusion
             ambient?.Dispose(); ambient = null;
             assets?.Dispose(); assets = null; diagnostic = null;
             if(instance == this) instance = null;
-            CameraOcclusion.ResetGlobals();
+            CameraOcclusion.ResetGlobals(); FtrRtao.ClearRequest();
         }
     }
 }

@@ -49,7 +49,7 @@ namespace FuckTheseFX.Source.Occlusion
         internal void BeforeAmbient(CommandBuffer cb) => Copy(cb,stages[0]);
         internal void AfterAmbient(CommandBuffer cb) => Copy(cb,stages[1]);
 
-        internal void Record(OcclusionSettings settings, RenderTexture ao, RenderTexture alpha, RenderTexture actors)
+        internal void Record(OcclusionSettings settings, RenderTexture ao, RenderTexture alpha, RenderTexture actors, RtaoInput rtao)
         {
             Detach();
             beforeOpaque.Clear(); afterOpaque.Clear(); afterAlpha.Clear();
@@ -75,7 +75,7 @@ namespace FuckTheseFX.Source.Occlusion
                     if(cb.name == OpaqueName) camera.AddCommandBuffer(CameraEvent.BeforeImageEffectsOpaque,afterOpaque);
                 }
             }
-            FoliageOcclusion.Configure(material,camera,settings,ao,alpha,actors);
+            FoliageOcclusion.Configure(material,camera,settings,ao,alpha,actors,rtao);
             Copy(afterAlpha,stages[4]);
             var view=settings.FoliagePreview.Value;
             int index=view==FoliageLivePreview.BeforeAmbient?0:view==FoliageLivePreview.AfterAmbient?1:

@@ -29,6 +29,16 @@ The occlusion integration initializes independently of other rendering plugins. 
 - Resources follow the optic render target. FTO resizes it in steps, so the AO targets are recreated at each step; GPU cost scales with the optic render size.
 - Turning the toggle off, XeGTAO off, game AO Off, or switching an active scope to nightvision/thermal disposes the optic effect and restores native ambient for that camera. Leaving the scope keeps the effect allocated on the inactive optic camera so the next aim does not reallocate it. A failure logs once and disables optic AO until XeGTAO or the toggle is switched off/on.
 
+## Ray-traced hidden-occluder AO (FuckTheseRays)
+
+XeGTAO keeps everything screen space can see (detail, grass, contact). With **FuckTheseRays** (FTR) running RTGI, the main camera can additionally darken surfaces occluded by geometry screen space cannot see (car undersides, overhangs, off-screen or behind-the-depth-layer occluders) at any distance within **2. XeGTAO / RT AO Radius**. FTR derives it from its existing RTGI cosine donor rays; FTFX only consumes it. Without FTR, with RTGI off, with **RT AO Enabled** off or **RT AO Strength (%)** at 0, FTFX output is bit-identical to 1.10.0: the composite shader skips the term entirely.
+
+- **RT AO Enabled** (default on) multiplies the XeGTAO visibility by FTR's hidden-occluder visibility (single-channel texture, `R` = V_hid). **RT AO Strength (%)** blends it in (default 100); **RT AO Radius** (default 3 m, 0.5-10) is the ray-traced occlusion distance.
+- The term is applied inside the composite shader's `Primary()` after XeGTAO's power/intensity curve, with the same distance fade as XeGTAO (`k * (1 - fade)`, so it vanishes where AO is faded out). Every pass that calls `Primary()` receives it: deferred HDR/LDR composite, the preserved diffuse-occlusion pass feeding CustomAmbient, the CombinedAO debug view and foliage extra AO. SSCGI/ColorBleed, the bent normals and the actor second pass keep reading the raw resolved visibility and are unchanged. The texture is sampled bilinearly at the composite UV, so its size may differ from the camera's.
+- Main camera only; optic cameras never request or use it. Game AO Off keeps disabling everything, including the request.
+- Interop is CPU-side shader globals (contract version 1), see `AGENTS.md` "Persisted contracts". FTFX writes `_FTFX_RtaoRequest` every main-camera pre-cull while XeGTAO is active for it, RT AO Enabled is on and strength is above 0 (zero otherwise, never from command buffers). During `Record` it reads `_FTR_RtaoState` and `_FTR_HiddenVisibility` and accepts only a valid, versioned state at most one frame old with a live texture; otherwise it binds a white texture and strength 0.
+- Validation: `scripts/Test-Occlusion.ps1` checks the term against the CPU formula, zero-strength bit identity, distance-fade removal and state acceptance. In-raid feedback (2026-11-11, FTFX 1.11.0 with FTR 0.33.0): the product combination works well. A Min combination (darker of XeGTAO and the full ray-traced visibility) was tested, was too dark and flashed on quick turns, and was removed.
+
 ## Actor optimization
 
 Depth prefiltering remains full resolution and includes the entire scene. Actor radius changes depth-mip weighting, so the primary pyramid is not reused. An 8 x 8 tile classifier finds actors inside the distance cutoff; a full neighboring-tile halo supplies every AO/edge sample required by the single denoiser pass. Horizon sampling skips other tiles. The final denoiser skips inactive core tiles and writes neutral output, preventing stale shading as actors move. No GPU-to-CPU readback is used at runtime.
@@ -37,7 +47,7 @@ The actor composite reads filtered integer AO and linear depth directly. It pres
 
 ## Validation
 
-- `scripts/Test-Occlusion.ps1`: D3D11 bundle compilation, real Harmony routing against an API fixture, native fallback, HDR/LDR composition, full-frame versus tiled actor equivalence, old versus fused actor composite, stencil classes, original-alpha capture, camera resets/resizing, all nine debug views and disposal.
+- `scripts/Test-Occlusion.ps1`: D3D11 bundle compilation (this script rebuilds `Assets/occlusion` from `unity/Assets`), real Harmony routing against an API fixture, native fallback, HDR/LDR composition, full-frame versus tiled actor equivalence, old versus fused actor composite, stencil classes, original-alpha capture, camera resets/resizing, all nine debug views and disposal.
 - `scripts/Test-CustomAmbient.ps1`: native-parity and bent-normal shader checks against the installed native ambient shader, including diffuse/fill, reflections, fog/night vision, authored zero-alpha foliage and both HDR encodings.
 - `scripts/Build-Package.ps1`: Release compilation, configuration entries, unchanged other-FX contracts, installed EFT AO/ambient/stencil ABI, AO initialization without installed-plugin bypasses, no Amplify dependency, exact ZIP allowlist and entry hashes.
 

@@ -16,17 +16,18 @@ namespace FuckTheseFX.Source.Occlusion
             this.camera = camera; quad = assets.Quad;
             material = new Material(assets.Composite) { hideFlags = HideFlags.HideAndDontSave };
         }
-        internal static void Configure(Material material, Camera camera, OcclusionSettings settings, RenderTexture ao, RenderTexture alpha, RenderTexture actors)
+        internal static void Configure(Material material, Camera camera, OcclusionSettings settings, RenderTexture ao, RenderTexture alpha, RenderTexture actors, RtaoInput rtao)
         {
             material.SetVector("_Size",new Vector4(ao.width,ao.height,camera.farClipPlane/65504f,0));
             material.SetVector("_AOFade",settings.DistanceFade);
             material.SetTexture("_PrimaryAO",ao);
+            rtao.Apply(material);
             material.SetTexture("_LiveAlpha",alpha);
             material.SetTexture("_ActorMask",actors);
             material.SetVector("_LiveSettings",new Vector4(settings.FoliageExtraAOFraction,
                 settings.FoliageLive && settings.FoliageSplit.Value ? settings.FoliageSplitPositionFraction : -1,camera.farClipPlane,0));
         }
-        internal void Record(OcclusionSettings settings, RenderTexture ao, RenderTexture alpha, RenderTexture actors)
+        internal void Record(OcclusionSettings settings, RenderTexture ao, RenderTexture alpha, RenderTexture actors, RtaoInput rtao)
         {
             camera.RemoveCommandBuffer(CameraEvent.BeforeImageEffectsOpaque,commands);
             commands.Clear();
@@ -34,7 +35,7 @@ namespace FuckTheseFX.Source.Occlusion
             int matches=0;
             foreach(var cb in buffers) if(cb.name==FoliageLive.OpaqueName) matches++;
             if(matches!=1) return;
-            Configure(material,camera,settings,ao,alpha,actors);
+            Configure(material,camera,settings,ao,alpha,actors,rtao);
             commands.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
             commands.DrawMesh(quad,Matrix4x4.identity,material,0,8);
             // Shade the surface colour before the native opaque buffer blends fog over it.

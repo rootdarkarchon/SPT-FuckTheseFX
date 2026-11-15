@@ -271,6 +271,36 @@
   },
   {
     "section": "2. XeGTAO",
+    "key": "RT AO Enabled",
+    "default": "True",
+    "type": "Boolean",
+    "advanced": false,
+    "min": null,
+    "max": null,
+    "list": null
+  },
+  {
+    "section": "2. XeGTAO",
+    "key": "RT AO Strength (%)",
+    "default": "100",
+    "type": "Int32",
+    "advanced": true,
+    "min": "0",
+    "max": "100",
+    "list": null
+  },
+  {
+    "section": "2. XeGTAO",
+    "key": "RT AO Radius",
+    "default": "3",
+    "type": "Single",
+    "advanced": true,
+    "min": "0.5",
+    "max": "10",
+    "list": null
+  },
+  {
+    "section": "2. XeGTAO",
     "key": "EffectRadius",
     "default": "1",
     "type": "Single",
