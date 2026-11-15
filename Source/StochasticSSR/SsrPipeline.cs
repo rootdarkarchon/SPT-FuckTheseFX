@@ -142,7 +142,6 @@ namespace FuckTheseFX.Source.StochasticSSR
             rgFloatTarget=SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RGFloat);
             capsRead=true;
         }
-        internal static bool SupportsArgbHalfRandomWrite {get{ReadCaps();return argbHalfRandomWrite;}}
         internal static bool SupportsRgFloatTarget {get{ReadCaps();return rgFloatTarget;}}
         private static bool DeviceSupported {get{ReadCaps();return deviceSupported;}}
         internal static bool Supports(Camera c,int w,int h)=>c!=null && !c.orthographic && !c.stereoEnabled && c.allowHDR &&

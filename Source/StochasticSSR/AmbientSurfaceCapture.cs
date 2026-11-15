@@ -40,7 +40,11 @@ namespace FuckTheseFX.Source.StochasticSSR
         private static bool Supported(Camera c)=>Enabled && c!=null && !failed.Contains(c) &&
             (IsMainCamera?.Invoke(c)==true || IsOpticCamera?.Invoke(c)==true) &&
             c.allowHDR && !c.stereoEnabled && !c.orthographic && c.actualRenderingPath==RenderingPath.DeferredShading &&
-            SystemInfo.graphicsDeviceType==GraphicsDeviceType.Direct3D11 && SsrPipeline.SupportsArgbHalfRandomWrite;
+            SystemInfo.graphicsDeviceType==GraphicsDeviceType.Direct3D11 && SupportsArgbHalfRandomWrite();
+        // Device constant; Unity boxes the format on every query. Kept local: the
+        // occlusion fixture compiles this file without SsrPipeline.
+        private static bool? argbHalfRandomWrite;
+        private static bool SupportsArgbHalfRandomWrite()=>argbHalfRandomWrite??=SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.ARGBHalf);
         internal static RenderTexture Get(Camera c,int w,int h)
         {
             if(!Supported(c) || c.pixelWidth!=w || c.pixelHeight!=h)return null;
