@@ -10,7 +10,7 @@ namespace FuckTheseFX.Source.StochasticSSR
     public enum ReflectionResolution { R256=256, R512=512, R768=768, R1024=1024, R1536=1536, R2048=2048 }
     public enum OpticReflectionResolution { R256=256, R512=512, R768=768 }
     public enum ReflectionView { Normal=0, HitMask=1, HitUV=2, HitDepthDistance=3, RawHitRadiance=4, TodSkyRadiance=5, EnvironmentProbeRadiance=6, SourceClassification=7, Confidence=8, ChosenRadiance=9, NormalLength=10, NormalizedNormal=11, MaterialWeight=12, EnvironmentContribution=13, ReplacementDelta=14, EnvironmentRemovedScene=15, AddedReflection=16, TraceTermination=25, CoverageStages=26, ReconstructionLoss=27, ReceiverColourFallback=28, WaterCoverage=29, ContinuationSource=30, ContinuationCost=31, RejectionLocation=32, HaloStages=33, DepthHitKind=34, DepthHitConfidence=35, GapFillCoverage=36 }
-    internal struct Options
+    internal struct Options : IEquatable<Options>
     {
         internal SsrMode Mode;
         internal int Steps,HistoryFrames,ContinuationSamples;
@@ -37,10 +37,33 @@ namespace FuckTheseFX.Source.StochasticSSR
         // Resolution denotes the square trace extent.
         internal Vector2Int TraceDimensions()
         {
-            int size=Enum.IsDefined(typeof(ReflectionResolution),Resolution)?(int)Resolution:1024;
+            int size=Resolution switch {ReflectionResolution.R256=>256,ReflectionResolution.R512=>512,ReflectionResolution.R768=>768,ReflectionResolution.R1024=>1024,ReflectionResolution.R1536=>1536,ReflectionResolution.R2048=>2048,_=>1024};
             return new Vector2Int(size,size);
         }
         internal bool SameRendering(Options other) {var copy=this;copy.CaptureContinuation=copy.CaptureTraversal=false;other.CaptureContinuation=other.CaptureTraversal=false;return copy.Equals(other);}
+        // Field-wise on purpose: the default struct comparison boxes and reflects. Test-StochasticSsrContracts.ps1 requires every field here.
+        public bool Equals(Options o)=>Mode==o.Mode && Steps==o.Steps && HistoryFrames==o.HistoryFrames && ContinuationSamples==o.ContinuationSamples &&
+            Thickness==o.Thickness && Smoothness==o.Smoothness && EdgePixels==o.EdgePixels && FallbackStrength==o.FallbackStrength && SurfaceColourInfluence==o.SurfaceColourInfluence &&
+            ContinuationPixels==o.ContinuationPixels && ContinuationDepth==o.ContinuationDepth && ThicknessConfidenceFloor==o.ThicknessConfidenceFloor &&
+            Temporal==o.Temporal && Freeze==o.Freeze && CaptureContinuation==o.CaptureContinuation && CaptureTraversal==o.CaptureTraversal && EndpointSkyFallback==o.EndpointSkyFallback &&
+            Resolution==o.Resolution && Optics==o.Optics && ReduceMainInOptics==o.ReduceMainInOptics && OpticResolution==o.OpticResolution && View==o.View && Reconstruction==o.Reconstruction &&
+            ReceiverCutoff==o.ReceiverCutoff && CutoffEnvironmentBlend==o.CutoffEnvironmentBlend && ZeroSmoothnessProbe==o.ZeroSmoothnessProbe && NrdAntiFirefly==o.NrdAntiFirefly &&
+            ZeroSmoothnessProbeStrength==o.ZeroSmoothnessProbeStrength && ZeroSmoothnessProbeClose==o.ZeroSmoothnessProbeClose && ZeroSmoothnessProbeFadeStart==o.ZeroSmoothnessProbeFadeStart &&
+            ZeroSmoothnessProbeFadeEnd==o.ZeroSmoothnessProbeFadeEnd && SupportSmoothness==o.SupportSmoothness;
+        public override bool Equals(object obj)=>obj is Options o && Equals(o);
+        public override int GetHashCode() {
+            unchecked {
+                int h=(int)Mode;h=h*31+Steps;h=h*31+HistoryFrames;h=h*31+ContinuationSamples;
+                h=h*31+Thickness.GetHashCode();h=h*31+Smoothness.GetHashCode();h=h*31+EdgePixels.GetHashCode();h=h*31+FallbackStrength.GetHashCode();h=h*31+SurfaceColourInfluence.GetHashCode();
+                h=h*31+ContinuationPixels.GetHashCode();h=h*31+ContinuationDepth.GetHashCode();h=h*31+ThicknessConfidenceFloor.GetHashCode();
+                h=h*31+Temporal.GetHashCode();h=h*31+Freeze.GetHashCode();h=h*31+CaptureContinuation.GetHashCode();h=h*31+CaptureTraversal.GetHashCode();h=h*31+EndpointSkyFallback.GetHashCode();
+                h=h*31+(int)Resolution;h=h*31+Optics.GetHashCode();h=h*31+ReduceMainInOptics.GetHashCode();h=h*31+(int)OpticResolution;h=h*31+(int)View;h=h*31+(int)Reconstruction;
+                h=h*31+ReceiverCutoff.GetHashCode();h=h*31+CutoffEnvironmentBlend.GetHashCode();h=h*31+ZeroSmoothnessProbe.GetHashCode();h=h*31+NrdAntiFirefly.GetHashCode();
+                h=h*31+ZeroSmoothnessProbeStrength.GetHashCode();h=h*31+ZeroSmoothnessProbeClose.GetHashCode();h=h*31+ZeroSmoothnessProbeFadeStart.GetHashCode();
+                h=h*31+ZeroSmoothnessProbeFadeEnd.GetHashCode();h=h*31+SupportSmoothness.GetHashCode();
+                return h;
+            }
+        }
     }
     // Tracing only: radiance, coverage, hit geometry and source classification.
     internal sealed class SsrPipeline : IDisposable
@@ -108,10 +131,22 @@ namespace FuckTheseFX.Source.StochasticSSR
             triangle=new Mesh{name="FTFX SSR trace triangle",hideFlags=HideFlags.HideAndDontSave};
             triangle.vertices=new[]{new Vector3(-1,-1,0),new Vector3(-1,3,0),new Vector3(3,-1,0)};triangle.triangles=new[]{0,1,2};triangle.UploadMeshData(true);
         }
+        // The device never changes during the process; read the caps once, on first use from the main thread (Supports runs in render hooks).
+        private static bool capsRead,deviceSupported,argbHalfRandomWrite,rgFloatTarget;
+        private static void ReadCaps()
+        {
+            if(capsRead)return;
+            argbHalfRandomWrite=SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.ARGBHalf);
+            deviceSupported=SystemInfo.graphicsDeviceType==GraphicsDeviceType.Direct3D11 && SystemInfo.supportsComputeShaders &&
+                SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.ARGBFloat) && SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.RFloat) && argbHalfRandomWrite;
+            rgFloatTarget=SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RGFloat);
+            capsRead=true;
+        }
+        internal static bool SupportsArgbHalfRandomWrite {get{ReadCaps();return argbHalfRandomWrite;}}
+        internal static bool SupportsRgFloatTarget {get{ReadCaps();return rgFloatTarget;}}
+        private static bool DeviceSupported {get{ReadCaps();return deviceSupported;}}
         internal static bool Supports(Camera c,int w,int h)=>c!=null && !c.orthographic && !c.stereoEnabled && c.allowHDR &&
-            c.actualRenderingPath==RenderingPath.DeferredShading && c.cameraType==CameraType.Game && w>=16 && h>=16 && w<=8192 && h<=8192 &&
-            SystemInfo.graphicsDeviceType==GraphicsDeviceType.Direct3D11 && SystemInfo.supportsComputeShaders &&
-            SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.ARGBFloat) && SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.RFloat) && SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.ARGBHalf);
+            c.actualRenderingPath==RenderingPath.DeferredShading && c.cameraType==CameraType.Game && w>=16 && h>=16 && w<=8192 && h<=8192 && DeviceSupported;
         internal bool Ready {
             get {return CameraTargetsReady() && Created(Radiance) && TraceTargetsReady(Radiance.width,Radiance.height);}
         }

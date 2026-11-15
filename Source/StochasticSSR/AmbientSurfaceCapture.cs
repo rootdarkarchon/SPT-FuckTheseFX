@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -41,7 +40,7 @@ namespace FuckTheseFX.Source.StochasticSSR
         private static bool Supported(Camera c)=>Enabled && c!=null && !failed.Contains(c) &&
             (IsMainCamera?.Invoke(c)==true || IsOpticCamera?.Invoke(c)==true) &&
             c.allowHDR && !c.stereoEnabled && !c.orthographic && c.actualRenderingPath==RenderingPath.DeferredShading &&
-            SystemInfo.graphicsDeviceType==GraphicsDeviceType.Direct3D11 && SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.ARGBHalf);
+            SystemInfo.graphicsDeviceType==GraphicsDeviceType.Direct3D11 && SsrPipeline.SupportsArgbHalfRandomWrite;
         internal static RenderTexture Get(Camera c,int w,int h)
         {
             if(!Supported(c) || c.pixelWidth!=w || c.pixelHeight!=h)return null;
@@ -77,7 +76,8 @@ namespace FuckTheseFX.Source.StochasticSSR
             try{Prepare(c,c.pixelWidth,c.pixelHeight);}catch(Exception error){Fail(c,error);}
         }
         private static void Remember(CommandBuffer cb) {
-            if(!recorded.Any(w=>ReferenceEquals(w.Target,cb)))recorded.Add(new WeakReference(cb));
+            for(int i=0;i<recorded.Count;i++)if(ReferenceEquals(recorded[i].Target,cb))return;
+            recorded.Add(new WeakReference(cb));
         }
         internal static bool Begin(CommandBuffer cb,Camera c,bool producerAvailable)
         {
@@ -119,7 +119,9 @@ namespace FuckTheseFX.Source.StochasticSSR
         internal static void Prune() {
             // Native ambient buffers can retain recorded references across ADS
             // and setting changes. Keep live texture identities until teardown.
-            foreach(var c in entries.Keys.Where(c=>c==null).ToArray()){entries[c].Dispose();entries.Remove(c);}
+            List<Camera> dead=null;
+            foreach(var c in entries.Keys)if(c==null)(dead??=new List<Camera>()).Add(c);
+            if(dead!=null)foreach(var c in dead){entries[c].Dispose();entries.Remove(c);}
             failed.RemoveWhere(c=>c==null);
             recorded.RemoveAll(w=>!w.IsAlive);
         }

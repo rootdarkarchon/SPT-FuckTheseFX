@@ -31,6 +31,7 @@ namespace FuckTheseFX.Source.StochasticSSR
         private readonly HashSet<Camera> failed=new HashSet<Camera>();
         private readonly Dictionary<Camera,int> generations=new Dictionary<Camera,int>();
         private readonly Dictionary<Camera,Activity> activity=new Dictionary<Camera,Activity>();
+        private readonly Dictionary<Camera,State> states=new Dictionary<Camera,State>();
         private struct Activity { internal PostProcessRenderContext Context;internal ScreenSpaceReflections Effect;internal int Frame; }
         private Options previous;
         private bool hasPrevious;
@@ -79,7 +80,9 @@ namespace FuckTheseFX.Source.StochasticSSR
                 pipeline.PrepareRaster(__0.camera,aaMode,__0.width,__0.height);
                 using(SsrGpuSample.Measure(__0.command,__0.camera,"Total"))pipeline.Render(__0.command,__0.camera,__0.source,__0.destination,o);
                 self.activity[__0.camera]=new Activity {Context=__0,Effect=effect,Frame=Time.frameCount};
-                __state=new State {Pipeline=pipeline,Owner=self,Camera=__0.camera};return false;
+                // One State per camera, reused every frame; After only reads it before the next Before for this camera.
+                if(!self.states.TryGetValue(__0.camera,out var state)){state=new State {Owner=self,Camera=__0.camera};self.states.Add(__0.camera,state);}
+                state.Pipeline=pipeline;__state=state;return false;
             } catch(Exception e) {
                 self.failed.Add(__0.camera);
                 self.activity.Remove(__0.camera);
@@ -124,13 +127,13 @@ namespace FuckTheseFX.Source.StochasticSSR
         }
         internal void Prune() {
             dead.Clear();foreach(var pair in cameras)if(pair.Key==null)dead.Add(pair.Key);
-            foreach(var c in dead){cameras[c].Dispose();cameras.Remove(c);generations.Remove(c);failed.Remove(c);activity.Remove(c);}
+            foreach(var c in dead){cameras[c].Dispose();cameras.Remove(c);states.Remove(c);generations.Remove(c);failed.Remove(c);activity.Remove(c);}
             deadRenderers.Clear();foreach(var pair in renderers)if(pair.Value==null)deadRenderers.Add(pair.Key);
             foreach(var r in deadRenderers)renderers.Remove(r);
         }
         internal void Suspend() {
             foreach(var r in renderers.Keys)try{reset.Invoke(r,null);}catch{}
-            renderers.Clear();foreach(var p in cameras.Values)p.Dispose();cameras.Clear();generations.Clear();failed.Clear();activity.Clear();hasPrevious=false;
+            renderers.Clear();foreach(var p in cameras.Values)p.Dispose();cameras.Clear();states.Clear();generations.Clear();failed.Clear();activity.Clear();hasPrevious=false;
         }
         public void Dispose(){Suspend();if(Active==this)Active=null;}
     }

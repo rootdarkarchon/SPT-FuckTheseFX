@@ -22,6 +22,7 @@ namespace FuckTheseFX.Source.StochasticSSR
         private readonly Dictionary<Camera,Entry> entries=new Dictionary<Camera,Entry>();
         private readonly ConditionalWeakTable<CommandBuffer,Binding> bindings=new ConditionalWeakTable<CommandBuffer,Binding>();
         private readonly List<WeakReference> recorded=new List<WeakReference>();
+        private readonly MaterialPropertyBlock recordBlock=new MaterialPropertyBlock();
         private readonly HashSet<Camera> failed=new HashSet<Camera>();
         private sealed class Binding { internal RenderTargetIdentifier[] Targets;internal RenderTargetIdentifier Depth; }
         private sealed class Entry : IDisposable
@@ -83,7 +84,9 @@ namespace FuckTheseFX.Source.StochasticSSR
             Active?.CaptureBottom(cb,camera);
             cb.SetRenderTarget(targets,depth);
             if(Active==null)return;
-            var b=Active.bindings.GetValue(cb,key=>new Binding());b.Targets=(RenderTargetIdentifier[])targets.Clone();b.Depth=depth;
+            var b=Active.bindings.GetValue(cb,key=>new Binding());
+            if(b.Targets!=null && b.Targets.Length==targets.Length)Array.Copy(targets,b.Targets,targets.Length);else b.Targets=(RenderTargetIdentifier[])targets.Clone();
+            b.Depth=depth;
         }
         private static void DrawBlock(CommandBuffer cb,Mesh mesh,Matrix4x4 matrix,Material original,int submesh,int pass,MaterialPropertyBlock block,Camera camera)
         {
@@ -95,10 +98,30 @@ namespace FuckTheseFX.Source.StochasticSSR
             cb.DrawMesh(mesh,matrix,original,submesh,pass);
             if(pass==0 && SupportedMaterial(original))Active?.Record(cb,mesh,matrix,submesh,camera);
         }
-        private static bool SupportedMaterial(Material m)=>m!=null && m.shader!=null &&
-            (m.shader.name=="Hidden/WaterForSSRv2" || m.shader.name=="Hidden/FTFX/WaterParity");
+        private static Shader lastShader;
+        private static bool lastShaderSupported;
+        private static bool SupportedMaterial(Material m)
+        {
+            if(m==null)return false;
+            var shader=m.shader;
+            if(shader==null)return false;
+            // Shader.name allocates; resolve it only when the draw's shader object changes.
+            if(!ReferenceEquals(shader,lastShader)){lastShader=shader;var n=shader.name;lastShaderSupported=n=="Hidden/WaterForSSRv2" || n=="Hidden/FTFX/WaterParity";}
+            return lastShaderSupported;
+        }
+        private void Remember(CommandBuffer cb)
+        {
+            for(int i=0;i<recorded.Count;i++)if(ReferenceEquals(recorded[i].Target,cb))return;
+            recorded.Add(new WeakReference(cb));
+        }
+        private static void Resize(RenderTexture t,Camera c)
+        {
+            if(t.width==c.pixelWidth && t.height==c.pixelHeight && t.IsCreated())return;
+            // Retain texture object identity for already recorded native buffers.
+            t.Release();t.width=c.pixelWidth;t.height=c.pixelHeight;if(!t.Create())throw new InvalidOperationException("Water capture resize failed");
+        }
         private bool Enabled(Camera c)=>c!=null && !failed.Contains(c) && Requested?.Invoke()==true && IsMainCamera?.Invoke(c)==true &&
-            SsrPipeline.Supports(c,c.pixelWidth,c.pixelHeight) && SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RGFloat);
+            SsrPipeline.Supports(c,c.pixelWidth,c.pixelHeight) && SsrPipeline.SupportsRgFloatTarget;
         private void BeforeCamera(Camera c)
         {
             if(!entries.TryGetValue(c,out var e))return;
@@ -122,10 +145,7 @@ namespace FuckTheseFX.Source.StochasticSSR
                     c.AddCommandBuffer(CameraEvent.AfterGBuffer,e.Capture);entries.Add(c,e);
                 }catch{e.Dispose();throw;}
             }
-            foreach(var t in new[]{e.Bottom,e.Mask})if(t.width!=c.pixelWidth || t.height!=c.pixelHeight || !t.IsCreated()) {
-                // Retain texture object identity for already recorded native buffers.
-                t.Release();t.width=c.pixelWidth;t.height=c.pixelHeight;if(!t.Create())throw new InvalidOperationException("Water capture resize failed");
-            }
+            Resize(e.Bottom,c);Resize(e.Mask,c);
             e.Capture.Clear();e.Capture.SetRenderTarget(e.Mask);e.Capture.ClearRenderTarget(false,true,Color.clear);
             e.Capture.SetGlobalFloat("_FTFXWaterBottomCaptured",0);
             e.Capture.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);return e;
@@ -135,7 +155,7 @@ namespace FuckTheseFX.Source.StochasticSSR
             if(!Enabled(camera))return;
             try {
                 var e=Prepare(camera);
-                if(!recorded.Any(w=>ReferenceEquals(w.Target,cb)))recorded.Add(new WeakReference(cb));
+                Remember(cb);
                 // The resolved depth may still be stale at AfterGBuffer. Read
                 // it at the native water boundary, before water depth writes.
                 // A GPU guard preserves the first snapshot across all owners.
@@ -149,10 +169,10 @@ namespace FuckTheseFX.Source.StochasticSSR
             if(!Enabled(camera) || !bindings.TryGetValue(cb,out var b))return;
             try {
                 var e=Prepare(camera);
-                if(!recorded.Any(w=>ReferenceEquals(w.Target,cb)))recorded.Add(new WeakReference(cb));
-                var block=new MaterialPropertyBlock();block.SetTexture("_WaterBottom",e.Bottom);
+                Remember(cb);
+                recordBlock.Clear();recordBlock.SetTexture("_WaterBottom",e.Bottom);
                 cb.SetRenderTarget(e.Mask,b.Depth);
-                cb.DrawMesh(mesh,matrix,material,submesh,1,block);
+                cb.DrawMesh(mesh,matrix,material,submesh,1,recordBlock);
             }catch(Exception error){Fail(camera,error);}
             finally{cb.SetRenderTarget(b.Targets,b.Depth);}
         }
@@ -174,7 +194,10 @@ namespace FuckTheseFX.Source.StochasticSSR
         }
         internal void Prune()
         {
-            foreach(var c in entries.Keys.Where(c=>c==null).ToArray()){entries[c].Dispose();entries.Remove(c);}
+            // Scan without allocating; the removal list exists only when a camera died.
+            List<Camera> dead=null;
+            foreach(var c in entries.Keys)if(c==null)(dead??=new List<Camera>()).Add(c);
+            if(dead!=null)foreach(var c in dead){entries[c].Dispose();entries.Remove(c);}
             recorded.RemoveAll(w=>!w.IsAlive);
             failed.RemoveWhere(c=>c==null);
         }

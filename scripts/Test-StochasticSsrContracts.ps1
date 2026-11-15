@@ -31,6 +31,10 @@ try {
     if($types | Where-Object Namespace -match 'CleanupBaseline|PerformanceBaseline|TraceOptimizationBaseline|ContinuationOptimizationBaseline|HistoryCopyBaseline|HistoryOwnershipBaseline|PreNrdStandard') {throw 'Validation-only baseline leaked into release'}
     $options=$types | Where-Object { $_.Namespace -eq 'FuckTheseFX.Source.StochasticSSR' -and $_.Name -eq 'Options' }
     if(-not ($options.Fields | Where-Object { $_.Name -eq 'EndpointSkyFallback' -and $_.FieldType.FullName -eq 'System.Boolean' })) {throw 'Opt-in endpoint sky fallback runtime option missing'}
+    $optionsEquals=@($options.Methods | Where-Object { $_.Name -eq 'Equals' -and $_.Parameters.Count -eq 1 -and $_.Parameters[0].ParameterType.FullName -eq $options.FullName })
+    if($optionsEquals.Count -ne 1) {throw 'Options.Equals(Options) missing'}
+    $comparedFields=@($optionsEquals[0].Body.Instructions | Where-Object { $_.OpCode.Name -in @('ldfld','ldflda') -and $_.Operand -is [Mono.Cecil.FieldReference] } | ForEach-Object { $_.Operand.Name })
+    foreach($field in $options.Fields | Where-Object { -not $_.IsStatic }) { if($comparedFields -notcontains $field.Name) {throw "Options.Equals misses field $($field.Name)"} }
     if($options.Fields | Where-Object Name -in @('LimitNativeRange','Distance','BypassHitNormal','GlobalContinuedSky')) {throw 'Removed controls remain in runtime options'}
     if($options.Fields | Where-Object Name -in @('DdaForeground','SimpleMirrorTraversal')) {throw 'Removed traversal experiment remains in runtime options'}
     if($options.Fields | Where-Object Name -match 'Amd|Denoiser|Spatial|HitAware|GapFill|ForegroundSky|ForegroundAdjacent|ForegroundPermissiveness|Shallow|VarianceStrength|Direction|MatchCameraAspect|ConstrainHitToCell|HitNormalConfidenceOnly|RelaxOccluderReturn|SkyAfterContinuation') {throw 'Retired option fields remain'}
